@@ -1,0 +1,5 @@
+{
+  "model_type": "unigram",
+  "vocab_size": 16000,
+  "tokenizer_class": "SPMUnigramTokenizer"
+}

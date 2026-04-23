@@ -1,0 +1,80 @@
+warning: `VIRTUAL_ENV=/opt/homebrew/opt/python@3.13/Frameworks/Python.framework/Versions/3.13` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+PyTorch was not found. Models won't be available and only tokenizers, configuration and file/data utilities can be used.
+2026-04-23 00:50:21,682 - __main__ - INFO - ============================================================
+2026-04-23 00:50:21,682 - __main__ - INFO - Tokenizer Training
+2026-04-23 00:50:21,682 - __main__ - INFO - ============================================================
+2026-04-23 00:50:21,682 - __main__ - INFO - Method: morfessor
+2026-04-23 00:50:21,682 - __main__ - INFO - Corpus: data/processed/hsb_train.txt
+2026-04-23 00:50:21,682 - __main__ - INFO - Vocab size: 16000
+2026-04-23 00:50:21,682 - __main__ - INFO - Output: models/hsb_morfessor_v2
+2026-04-23 00:50:21,682 - __main__ - INFO - ============================================================
+2026-04-23 00:50:21,682 - tokenization.morfessor - INFO - Training Morfessor model...
+2026-04-23 00:50:21,682 - tokenization.morfessor - INFO -   Corpus: data/processed/hsb_train.txt
+2026-04-23 00:50:21,682 - tokenization.morfessor - INFO -   Target vocab size: 16000
+2026-04-23 00:50:21,682 - tokenization.morfessor - INFO -   Reading corpus and collecting characters...
+2026-04-23 00:50:26,032 - tokenization.morfessor - INFO -   Found 239 unique characters
+2026-04-23 00:50:26,032 - tokenization.morfessor - INFO -   Found 701902 unique words
+2026-04-23 00:50:26,032 - tokenization.morfessor - INFO -   Target morpheme types: 15755
+2026-04-23 00:50:26,032 - tokenization.morfessor - INFO -   Training Morfessor model...
+2026-04-23 00:50:26,032 - tokenization.morfessor - INFO -   Loading 701902 word types...
+2026-04-23 00:50:29,153 - morfessor.baseline - INFO - Compounds in training data: 701902 types / 701902 tokens
+2026-04-23 00:50:29,154 - morfessor.baseline - INFO - Starting batch training
+2026-04-23 00:50:29,154 - morfessor.baseline - INFO - Epochs: 0	Cost: 26495488.204427466
+...........................................................
+2026-04-23 00:52:25,080 - morfessor.baseline - INFO - Number of morph types: 153618
+2026-04-23 00:52:25,080 - morfessor.baseline - INFO - Corpus weight set to 0.3333333333333333
+2026-04-23 00:52:25,080 - morfessor.baseline - INFO - Epochs: 1	Cost: 7868700.268261916
+...........................................................
+2026-04-23 00:54:44,698 - morfessor.baseline - INFO - Number of morph types: 27443
+2026-04-23 00:54:44,698 - morfessor.baseline - INFO - Corpus weight set to 0.16666666666666666
+2026-04-23 00:54:44,698 - morfessor.baseline - INFO - Epochs: 2	Cost: 3299948.2996712383
+...........................................................
+2026-04-23 00:57:17,330 - morfessor.baseline - INFO - Number of morph types: 13217
+2026-04-23 00:57:17,330 - morfessor.baseline - INFO - Corpus weight set to 0.27777777777777773
+2026-04-23 00:57:17,331 - morfessor.baseline - INFO - Epochs: 3	Cost: 5128181.482151289
+...........................................................
+2026-04-23 00:59:47,668 - morfessor.baseline - INFO - Number of morph types: 16837
+2026-04-23 00:59:47,668 - morfessor.baseline - INFO - Corpus weight set to 0.18518518518518515
+2026-04-23 00:59:47,668 - morfessor.baseline - INFO - Epochs: 4	Cost: 3502234.5418363386
+...........................................................
+2026-04-23 01:02:20,575 - morfessor.baseline - INFO - Number of morph types: 14144
+2026-04-23 01:02:20,576 - morfessor.baseline - INFO - Corpus weight set to 0.2592592592592592
+2026-04-23 01:02:20,576 - morfessor.baseline - INFO - Epochs: 5	Cost: 4782572.956882175
+...........................................................
+2026-04-23 01:04:51,110 - morfessor.baseline - INFO - Number of morph types: 15881
+2026-04-23 01:04:51,110 - morfessor.baseline - INFO - Epochs: 6	Cost: 4777048.504856982
+...........................................................
+2026-04-23 01:07:23,551 - morfessor.baseline - INFO - Number of morph types: 15896
+2026-04-23 01:07:23,551 - morfessor.baseline - INFO - Epochs: 7	Cost: 4776692.440341199
+2026-04-23 01:07:23,551 - morfessor.baseline - INFO - Done.
+2026-04-23 01:07:23,555 - tokenization.morfessor - INFO -   Extracting morphemes from model lexicon...
+2026-04-23 01:07:55,947 - tokenization.morfessor - INFO -   Found 15894 unique morphemes
+2026-04-23 01:07:57,293 - tokenization.morfessor - INFO -   Final vocab size: 15830
+2026-04-23 01:07:57,293 - tokenization.morfessor - INFO -     Special tokens: 5
+2026-04-23 01:07:57,293 - tokenization.morfessor - INFO -     Characters: 240
+2026-04-23 01:07:57,293 - tokenization.morfessor - INFO -     Morphemes: 15585
+2026-04-23 01:07:57,293 - tokenization.morfessor - INFO -   Example segmentations:
+2026-04-23 01:07:57,297 - tokenization.morfessor - INFO -     Z -> ['Z']
+2026-04-23 01:07:57,297 - tokenization.morfessor - INFO -     na -> ['na']
+2026-04-23 01:07:57,297 - tokenization.morfessor - INFO -     so -> ['so']
+2026-04-23 01:07:57,297 - tokenization.morfessor - INFO -     slědowanjom -> ['slěd', 'owanjom']
+2026-04-23 01:07:57,297 - tokenization.morfessor - INFO -     dołhich -> ['dołhi', 'ch']
+2026-04-23 01:07:57,297 - tokenization.morfessor - INFO -     žołmow -> ['žołm', 'ow']
+2026-04-23 01:07:57,297 - tokenization.morfessor - INFO -     měnjeja -> ['měnje', 'ja']
+2026-04-23 01:07:57,297 - tokenization.morfessor - INFO -     stajnje -> ['staj', 'nje']
+2026-04-23 01:07:57,297 - tokenization.morfessor - INFO -     te -> ['te']
+2026-04-23 01:07:57,297 - tokenization.morfessor - INFO -     industrijowe -> ['industrij', 'owe']
+2026-04-23 01:08:29,401 - tokenization.morfessor - INFO -   Mean morphemes per word: 1.72
+2026-04-23 01:08:29,420 - __main__ - INFO - Training completed in 1087.7s
+2026-04-23 01:08:30,277 - tokenization.morfessor - INFO - Saved tokenizer to models/hsb_morfessor_v2
+2026-04-23 01:08:30,277 - __main__ - INFO - ============================================================
+2026-04-23 01:08:30,277 - __main__ - INFO - Summary
+2026-04-23 01:08:30,277 - __main__ - INFO - ============================================================
+2026-04-23 01:08:30,277 - __main__ - INFO - Final vocab size: 15830
+2026-04-23 01:08:30,277 - __main__ - INFO - Training time: 1087.7s
+2026-04-23 01:08:30,277 - __main__ - INFO - Saved to: models/hsb_morfessor_v2
+2026-04-23 01:08:30,277 - __main__ - INFO - 
+Test: 'Hornjoserbšćina je zapadosłowjanska rěč.'
+2026-04-23 01:08:30,278 - __main__ - INFO - Tokens: ['▁Hornjoserb', 'šćina', '▁je', '▁zapado', 'słowjan', 'ska', '▁rěč', '.']
+2026-04-23 01:08:30,278 - __main__ - INFO - IDs: [244, 10551, 4038, 244, 249, 244, 8121, 5459, 360, 244, 513, 19]
+2026-04-23 01:08:30,278 - __main__ - INFO - Decoded: 'Hornjoserbšćina je zapadosłowjanska rěč.'

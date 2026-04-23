@@ -1,0 +1,176 @@
+warning: `VIRTUAL_ENV=/opt/homebrew/opt/python@3.13/Frameworks/Python.framework/Versions/3.13` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+PyTorch was not found. Models won't be available and only tokenizers, configuration and file/data utilities can be used.
+2026-04-23 01:19:00,344 - __main__ - INFO - ============================================================
+2026-04-23 01:19:00,344 - __main__ - INFO - Tokenizer Evaluation
+2026-04-23 01:19:00,344 - __main__ - INFO - ============================================================
+2026-04-23 01:19:00,344 - __main__ - INFO - Corpus: data/processed/hsb_dev.txt
+2026-04-23 01:19:00,344 - __main__ - INFO - Models: ['models/hsb_spm_bpe_cleaned', 'models/hsb_spm_unigram_cleaned', 'models/hsb_morfessor_v2']
+2026-04-23 01:19:00,344 - __main__ - INFO - ============================================================
+2026-04-23 01:19:00,344 - __main__ - INFO - Loading spm_bpe tokenizer from models/hsb_spm_bpe_cleaned
+2026-04-23 01:19:00,349 - tokenization.spm_base - INFO - Loaded tokenizer from models/hsb_spm_bpe_cleaned
+2026-04-23 01:19:00,349 - tokenization.spm_base - INFO -   Vocab size: 16000
+2026-04-23 01:19:00,349 - tokenization.evaluate - INFO - Evaluating hsb_spm_bpe_cleaned...
+2026-04-23 01:19:00,370 - tokenization.evaluate - INFO -   Evaluation sentences: 36770
+2026-04-23 01:19:01,311 - tokenization.evaluate - INFO -   Fertility: 1.596 +/- 0.310
+2026-04-23 01:19:01,318 - tokenization.evaluate - INFO -   Vocab size (excl. special): 15995
+2026-04-23 01:19:02,286 - tokenization.evaluate - INFO -   Unique tokens used: 15,831 (98.9% of vocab)
+2026-04-23 01:19:03,643 - tokenization.evaluate - INFO -   OOV rate: 0.38%
+2026-04-23 01:19:03,677 - tokenization.evaluate - INFO -   Round-trip: 997 pass, 3 fail
+2026-04-23 01:19:03,677 - tokenization.evaluate - INFO -   Sample failures:
+2026-04-23 01:19:03,677 - tokenization.evaluate - INFO -     'Najprjedy změjemoj z wobnowjenjom a rjedźenjom ruc...' -> 'Najprjedy změjemoj z wobnowjenjom a rjedźenjom ruc...'
+2026-04-23 01:19:03,677 - tokenization.evaluate - INFO -     'Yesterday, all my troubles seemed so far away …...' -> 'Yesterday, all my troubles seemed so far away ......'
+2026-04-23 01:19:03,677 - tokenization.evaluate - INFO -     'Wóń stupaše Jakubej do nosa a … runje w poslednim ...' -> 'Wóń stupaše Jakubej do nosa a ... runje w posledni...'
+2026-04-23 01:19:03,703 - tokenization.evaluate - INFO -   HF compatibility: 100 match, 0 mismatch
+2026-04-23 01:19:03,706 - __main__ - INFO - Loading spm_unigram tokenizer from models/hsb_spm_unigram_cleaned
+2026-04-23 01:19:03,719 - tokenization.spm_base - INFO - Loaded tokenizer from models/hsb_spm_unigram_cleaned
+2026-04-23 01:19:03,719 - tokenization.spm_base - INFO -   Vocab size: 16000
+2026-04-23 01:19:03,719 - tokenization.evaluate - INFO - Evaluating hsb_spm_unigram_cleaned...
+2026-04-23 01:19:03,739 - tokenization.evaluate - INFO -   Evaluation sentences: 36770
+2026-04-23 01:19:04,136 - tokenization.evaluate - INFO -   Fertility: 1.604 +/- 0.334
+2026-04-23 01:19:04,142 - tokenization.evaluate - INFO -   Vocab size (excl. special): 15995
+2026-04-23 01:19:04,546 - tokenization.evaluate - INFO -   Unique tokens used: 15,888 (99.3% of vocab)
+2026-04-23 01:19:05,442 - tokenization.evaluate - INFO -   OOV rate: 0.44%
+2026-04-23 01:19:05,461 - tokenization.evaluate - INFO -   Round-trip: 997 pass, 3 fail
+2026-04-23 01:19:05,461 - tokenization.evaluate - INFO -   Sample failures:
+2026-04-23 01:19:05,461 - tokenization.evaluate - INFO -     'Najprjedy změjemoj z wobnowjenjom a rjedźenjom ruc...' -> 'Najprjedy změjemoj z wobnowjenjom a rjedźenjom ruc...'
+2026-04-23 01:19:05,461 - tokenization.evaluate - INFO -     'Yesterday, all my troubles seemed so far away …...' -> 'Yesterday, all my troubles seemed so far away ......'
+2026-04-23 01:19:05,461 - tokenization.evaluate - INFO -     'Wóń stupaše Jakubej do nosa a … runje w poslednim ...' -> 'Wóń stupaše Jakubej do nosa a ... runje w posledni...'
+2026-04-23 01:19:05,491 - tokenization.evaluate - INFO -   HF compatibility: 100 match, 0 mismatch
+2026-04-23 01:19:05,494 - __main__ - INFO - Loading morfessor tokenizer from models/hsb_morfessor_v2
+2026-04-23 01:19:06,191 - tokenization.morfessor - INFO - Loaded tokenizer from models/hsb_morfessor_v2
+2026-04-23 01:19:06,191 - tokenization.morfessor - INFO -   Vocab size: 15830
+2026-04-23 01:19:06,191 - tokenization.evaluate - INFO - Evaluating hsb_morfessor_v2...
+2026-04-23 01:19:06,213 - tokenization.evaluate - INFO -   Evaluation sentences: 36770
+2026-04-23 01:19:16,328 - tokenization.evaluate - INFO -   Fertility: 1.733 +/- 0.247
+2026-04-23 01:19:16,329 - tokenization.evaluate - INFO -   Vocab size (excl. special): 15825
+2026-04-23 01:19:26,542 - tokenization.evaluate - INFO -   Unique tokens used: 20,699 (130.8% of vocab)
+2026-04-23 01:19:36,904 - tokenization.evaluate - INFO -   OOV rate: 0.30%
+2026-04-23 01:19:37,202 - tokenization.evaluate - INFO -   Round-trip: 1000 pass, 0 fail
+2026-04-23 01:19:37,266 - tokenization.evaluate - INFO -   HF compatibility: 100 match, 0 mismatch
+
+================================================================================
+TOKENIZER COMPARISON
+================================================================================
+
+Note: These metrics are sanity checks only. They do not indicate downstream task performance.
+
+Metric                         hsb_spm_bpe_cleaned  hsb_spm_unigram_cleaned         hsb_morfessor_v2
+----------------------------------------------------------------------------------------------------
+Fertility (mean)                             1.596                    1.604                    1.733
+Fertility (std)                              0.310                    0.334                    0.247
+Vocab size                                  15,995                   15,995                   15,825
+Unique tokens used                          15,831                   15,888                   20,699
+Vocab coverage                              98.9%                   99.3%                  130.8%
+OOV rate                                     0.38%                    0.44%                    0.30%
+Round-trip pass                                997                      997                    1,000
+Round-trip fail                                  3                        3                        0
+HF match                                       100                      100                      100
+HF mismatch                                      0                        0                        0
+
+================================================================================
+SAMPLE SEGMENTATIONS
+================================================================================
+
+dźěłaćerjo:
+  hsb_spm_bpe_cleaned: ▁dźěłaćerjo
+  hsb_spm_unigram_cleaned: ▁dźěłaćerjo
+  hsb_morfessor_v2: ▁dźěłaćer | jo
+
+přewodźowanje:
+  hsb_spm_bpe_cleaned: ▁přewo | dźowanje
+  hsb_spm_unigram_cleaned: ▁přewod | ź | owanje
+  hsb_morfessor_v2: ▁přewodź | owanje
+
+najwjetšich:
+  hsb_spm_bpe_cleaned: ▁najwjetšich
+  hsb_spm_unigram_cleaned: ▁najwjetši | ch
+  hsb_morfessor_v2: ▁naj | wjetši | ch
+
+předstajichu:
+  hsb_spm_bpe_cleaned: ▁předstajichu
+  hsb_spm_unigram_cleaned: ▁předstajichu
+  hsb_morfessor_v2: ▁předstaji | chu
+
+wozjewjenje:
+  hsb_spm_bpe_cleaned: ▁wozje | wjenje
+  hsb_spm_unigram_cleaned: ▁wozjewjen | je
+  hsb_morfessor_v2: ▁wozjewje | nje
+
+zwjazkoweje:
+  hsb_spm_bpe_cleaned: ▁zwjazkoweje
+  hsb_spm_unigram_cleaned: ▁zwjazkowe | je
+  hsb_morfessor_v2: ▁zwjazk | oweje
+
+towaršnosće:
+  hsb_spm_bpe_cleaned: ▁towaršnosće
+  hsb_spm_unigram_cleaned: ▁towaršnosće
+  hsb_morfessor_v2: ▁towaršnosć | e
+
+předsydstwom:
+  hsb_spm_bpe_cleaned: ▁předsyd | stwom
+  hsb_spm_unigram_cleaned: ▁předsydstwo | m
+  hsb_morfessor_v2: ▁předsyd | stwom
+
+wuwiće:
+  hsb_spm_bpe_cleaned: ▁wuwiće
+  hsb_spm_unigram_cleaned: ▁wuwiće
+  hsb_morfessor_v2: ▁wuwi | će
+
+přinoški:
+  hsb_spm_bpe_cleaned: ▁přinoški
+  hsb_spm_unigram_cleaned: ▁přinoški
+  hsb_morfessor_v2: ▁přinošk | i
+
+================================================================================
+
+Side-by-side comparison:
+
+dźěłaćerjo:
+  hsb_spm_bpe_cleaned: ▁dźěłaćerjo
+  hsb_spm_unigram_cleaned: ▁dźěłaćerjo
+  hsb_morfessor_v2: ▁dźěłaćer | jo
+
+přewodźowanje:
+  hsb_spm_bpe_cleaned: ▁přewo | dźowanje
+  hsb_spm_unigram_cleaned: ▁přewod | ź | owanje
+  hsb_morfessor_v2: ▁přewodź | owanje
+
+najwjetšich:
+  hsb_spm_bpe_cleaned: ▁najwjetšich
+  hsb_spm_unigram_cleaned: ▁najwjetši | ch
+  hsb_morfessor_v2: ▁naj | wjetši | ch
+
+předstajichu:
+  hsb_spm_bpe_cleaned: ▁předstajichu
+  hsb_spm_unigram_cleaned: ▁předstajichu
+  hsb_morfessor_v2: ▁předstaji | chu
+
+wozjewjenje:
+  hsb_spm_bpe_cleaned: ▁wozje | wjenje
+  hsb_spm_unigram_cleaned: ▁wozjewjen | je
+  hsb_morfessor_v2: ▁wozjewje | nje
+
+zwjazkoweje:
+  hsb_spm_bpe_cleaned: ▁zwjazkoweje
+  hsb_spm_unigram_cleaned: ▁zwjazkowe | je
+  hsb_morfessor_v2: ▁zwjazk | oweje
+
+towaršnosće:
+  hsb_spm_bpe_cleaned: ▁towaršnosće
+  hsb_spm_unigram_cleaned: ▁towaršnosće
+  hsb_morfessor_v2: ▁towaršnosć | e
+
+předsydstwom:
+  hsb_spm_bpe_cleaned: ▁předsyd | stwom
+  hsb_spm_unigram_cleaned: ▁předsydstwo | m
+  hsb_morfessor_v2: ▁předsyd | stwom
+
+wuwiće:
+  hsb_spm_bpe_cleaned: ▁wuwiće
+  hsb_spm_unigram_cleaned: ▁wuwiće
+  hsb_morfessor_v2: ▁wuwi | će
+
+přinoški:
+  hsb_spm_bpe_cleaned: ▁přinoški
+  hsb_spm_unigram_cleaned: ▁přinoški
+  hsb_morfessor_v2: ▁přinošk | i
