@@ -10,6 +10,7 @@ import sentencepiece as spm
 from transformers import PreTrainedTokenizer
 
 from tokenization.base import SPECIAL_TOKENS, BaseTokenizer
+from tokenization.pretokenize import moses_detokenize, moses_pretokenize
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +58,7 @@ class SentencePieceHFTokenizer(PreTrainedTokenizer):
         }
 
     def _tokenize(self, text: str) -> List[str]:
-        return self.sp_model.encode(text, out_type=str)
+        return self.sp_model.encode(moses_pretokenize(text), out_type=str)
 
     def _convert_token_to_id(self, token: str) -> int:
         return self.sp_model.piece_to_id(token)
@@ -68,7 +69,7 @@ class SentencePieceHFTokenizer(PreTrainedTokenizer):
         return self.unk_token
 
     def convert_tokens_to_string(self, tokens: List[str]) -> str:
-        return self.sp_model.decode_pieces(tokens)
+        return moses_detokenize(self.sp_model.decode_pieces(tokens))
 
     def save_vocabulary(
         self, save_directory: str, filename_prefix: str | None = None
@@ -141,19 +142,19 @@ class BaseSPMTokenizer(BaseTokenizer):
         """Tokenize text into subword pieces."""
         if self.sp_model is None:
             raise RuntimeError("Model not loaded. Call train() or load() first.")
-        return self.sp_model.encode(text, out_type=str)
+        return self.sp_model.encode(moses_pretokenize(text), out_type=str)
 
     def encode(self, text: str) -> List[int]:
         """Encode text into token IDs."""
         if self.sp_model is None:
             raise RuntimeError("Model not loaded. Call train() or load() first.")
-        return self.sp_model.encode(text, out_type=int)
+        return self.sp_model.encode(moses_pretokenize(text), out_type=int)
 
     def decode(self, ids: List[int]) -> str:
         """Decode token IDs back to text."""
         if self.sp_model is None:
             raise RuntimeError("Model not loaded. Call train() or load() first.")
-        return self.sp_model.decode(ids)
+        return moses_detokenize(self.sp_model.decode(ids))
 
     def save(self, path: str) -> None:
         """Save the tokenizer to a directory."""

@@ -11,6 +11,7 @@ import morfessor
 from transformers import PreTrainedTokenizer
 
 from tokenization.base import SPECIAL_TOKENS, BaseTokenizer
+from tokenization.pretokenize import moses_detokenize, moses_pretokenize
 
 logger = logging.getLogger(__name__)
 
@@ -97,11 +98,8 @@ class MorfessorHFTokenizer(PreTrainedTokenizer):
             raise RuntimeError("Morfessor model not loaded")
 
         tokens = []
-        for word in text.split():
-            word_tokens = segment_word_with_vocab(self.morfessor_model, self.vocab, word)
-            if word_tokens:
-                tokens.append("▁")
-                tokens.extend(word_tokens)
+        for word in moses_pretokenize(text).split():
+            tokens.extend(segment_word_with_vocab(self.morfessor_model, self.vocab, word))
 
         return tokens
 
@@ -112,29 +110,14 @@ class MorfessorHFTokenizer(PreTrainedTokenizer):
         return self.ids_to_tokens.get(index, "[UNK]")
 
     def convert_tokens_to_string(self, tokens: List[str]) -> str:
-        """Convert tokens back to text using ▁ as an explicit word boundary."""
-        words = []
-        current_word = []
+        """Concatenate morphemes and reverse Moses pretokenization.
 
-        for token in tokens:
-            if token == "▁":
-                if current_word:
-                    words.append("".join(current_word))
-                current_word = []
-                continue
-
-            if token.startswith("▁"):
-                if current_word:
-                    words.append("".join(current_word))
-                current_word = [token[1:]]
-                continue
-
-            current_word.append(token)
-
-        if current_word:
-            words.append("".join(current_word))
-
-        return " ".join(words)
+        Word boundaries are not preserved in Morfessor's flat ID stream by
+        design — Morfessor never crosses word boundaries during segmentation,
+        so the original word groupings are recovered approximately by Moses
+        detokenization rules.
+        """
+        return moses_detokenize("".join(tokens))
 
     def save_vocabulary(
         self, save_directory: str, filename_prefix: Optional[str] = None
@@ -195,7 +178,7 @@ class MorfessorTokenizer(BaseTokenizer):
         # Target morpheme count: vocab_size minus special tokens and character slots.
         # Morfessor self-tunes its corpus weight (α) during training to hit this budget,
         # rather than us post-hoc capping a larger lexicon.
-        target_morphs = vocab_size - len(SPECIAL_TOKENS) - len(char_inventory) - 1
+        target_morphs = vocab_size - len(SPECIAL_TOKENS) - len(char_inventory)
         logger.info(f"  Target morpheme types: {target_morphs}")
 
         # Canonical Morfessor settings:
@@ -243,9 +226,9 @@ class MorfessorTokenizer(BaseTokenizer):
         for i, tok in enumerate(SPECIAL_TOKENS):
             self.vocab[tok] = i
 
-        # 2. Add character inventory (IDs 5 to 5+len(chars)-1)
-        # Include ▁ (word boundary marker) in character set
-        char_inventory.add("▁")
+        # 2. Add character inventory (IDs 5 to 5+len(chars)-1).
+        # Characters are guaranteed slots so the fallback path can never
+        # produce [UNK] for a previously-seen character.
         char_start_id = len(SPECIAL_TOKENS)
         sorted_chars = sorted(char_inventory)
         for i, char in enumerate(sorted_chars):
@@ -305,61 +288,28 @@ class MorfessorTokenizer(BaseTokenizer):
         logger.info(f"  Mean morphemes per word: {mean_morphemes:.2f}")
 
     def tokenize(self, text: str) -> List[str]:
-        """Tokenize text using Morfessor segmentation.
-
-        Returns tokens with word boundary markers (▁ prefix for first morpheme of each word).
-        """
+        """Tokenize text into a flat list of morphemes (no word-boundary markers)."""
         if self.model is None:
             raise RuntimeError("Model not loaded. Call train() or load() first.")
 
         tokens = []
-        for word in text.split():
-            word_tokens = self._segment_word(word)
-            # Mark first token of word with ▁ prefix
-            if word_tokens:
-                word_tokens[0] = "▁" + word_tokens[0]
-            tokens.extend(word_tokens)
-
+        for word in moses_pretokenize(text).split():
+            tokens.extend(segment_word_with_vocab(self.model, self.vocab, word))
         return tokens
-
-    def _segment_word(self, word: str) -> List[str]:
-        """Segment a single word, falling back to chars if needed."""
-        return segment_word_with_vocab(self.model, self.vocab, word)
 
     def encode(self, text: str) -> List[int]:
         """Encode text into token IDs."""
-        tokens = self.tokenize(text)
-        ids = []
-        for tok in tokens:
-            if tok.startswith("▁"):
-                # Word boundary token: encode ▁ + the rest separately
-                ids.append(self.vocab["▁"])
-                rest = tok[1:]
-                if rest:
-                    ids.append(self.vocab.get(rest, self.vocab["[UNK]"]))
-            elif tok in self.vocab:
-                ids.append(self.vocab[tok])
-            else:
-                ids.append(self.vocab["[UNK]"])
-        return ids
+        return [self.vocab.get(tok, self.vocab["[UNK]"]) for tok in self.tokenize(text)]
 
     def decode(self, ids: List[int]) -> str:
-        """Decode token IDs back to text."""
+        """Decode token IDs back to text.
+
+        Word boundaries are not preserved in the flat ID stream — Morfessor
+        never crosses word boundaries during segmentation, so the morpheme
+        run is concatenated and Moses detokenization places spacing.
+        """
         tokens = [self.ids_to_tokens.get(i, "[UNK]") for i in ids]
-        # Reconstruct with spaces at word boundaries
-        result = []
-        current_word = []
-        for tok in tokens:
-            if tok.startswith("▁"):
-                # New word starts
-                if current_word:
-                    result.append("".join(current_word))
-                current_word = [tok[1:]]  # Remove ▁ prefix
-            else:
-                current_word.append(tok)
-        if current_word:
-            result.append("".join(current_word))
-        return " ".join(result)
+        return moses_detokenize("".join(tokens))
 
     def save(self, path: str) -> None:
         """Save tokenizer to directory."""

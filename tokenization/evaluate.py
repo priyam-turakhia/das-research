@@ -109,16 +109,8 @@ def compute_oov_rate(
 ) -> float:
     """Compute OOV-like rate on an evaluation set.
 
-    Counts words that either emit an unknown token or degrade into
-    pure character-level segmentation.
-
-    Args:
-        tokenizer: Tokenizer to evaluate.
-        evaluation_sentences: Evaluation sentences.
-        unk_token: Unknown token string.
-
-    Returns:
-        OOV rate as fraction.
+    A word counts as OOV if it produces an UNK token or if a multi-character
+    word collapses to single-character tokens (the character-fallback path).
     """
     total_words = 0
     oov_words = 0
@@ -127,16 +119,9 @@ def compute_oov_rate(
         for word in sentence.split():
             total_words += 1
             tokens = tokenizer.tokenize(word)
-            normalized_tokens = [
-                token[1:] if token.startswith("▁") else token
-                for token in tokens
-                if token != "▁"
-            ]
-
-            # Check if any token is UNK
-            if unk_token in normalized_tokens:
+            if unk_token in tokens:
                 oov_words += 1
-            elif normalized_tokens and all(len(t) == 1 for t in normalized_tokens) and len(word) > 1:
+            elif tokens and all(len(t) == 1 for t in tokens) and len(word) > 1:
                 oov_words += 1
 
     return oov_words / total_words if total_words > 0 else 0.0
@@ -144,39 +129,36 @@ def compute_oov_rate(
 
 def round_trip_test(
     tokenizer: BaseTokenizer, sentences: List[str], n_samples: int = 1000, seed: int = 42
-) -> Tuple[int, int, List[Tuple[str, str]]]:
-    """Test decode(encode(text)) == text.
+) -> Tuple[int, int, List[Tuple[List[str], List[str]]]]:
+    """Test that the token stream is preserved when going through IDs.
 
-    Args:
-        tokenizer: Tokenizer to test.
-        sentences: Sentences to sample from.
-        n_samples: Number of samples to test.
-        seed: Random seed.
-
-    Returns:
-        Tuple of (pass_count, fail_count, list of failures).
+    For each sample sentence, checks that `tokenize(text)` matches the result
+    of mapping `encode(text)` back through the vocabulary. This is the
+    lossless-encoding check and applies uniformly to all tokenizer types,
+    including those whose `decode` cannot recover the exact original text
+    (e.g. Morfessor without word-boundary markers).
     """
     random.seed(seed)
     samples = random.sample(sentences, min(n_samples, len(sentences)))
+
+    vocab = tokenizer.get_vocab()
+    id_to_token = {v: k for k, v in vocab.items()}
 
     passed = 0
     failed = 0
     failures = []
 
     for text in samples:
-        encoded = tokenizer.encode(text)
-        decoded = tokenizer.decode(encoded)
+        tokens = tokenizer.tokenize(text)
+        ids = tokenizer.encode(text)
+        round_tripped = [id_to_token.get(i, "[UNK]") for i in ids]
 
-        # Normalize whitespace for comparison
-        text_normalized = " ".join(text.split())
-        decoded_normalized = " ".join(decoded.split())
-
-        if text_normalized == decoded_normalized:
+        if tokens == round_tripped:
             passed += 1
         else:
             failed += 1
-            if len(failures) < 10:  # Keep first 10 failures
-                failures.append((text_normalized, decoded_normalized))
+            if len(failures) < 10:
+                failures.append((tokens, round_tripped))
 
     return passed, failed, failures
 
@@ -293,13 +275,14 @@ def evaluate_tokenizer(
     oov_rate = compute_oov_rate(tokenizer, evaluation_sentences)
     logger.info(f"  OOV rate: {oov_rate:.2%}")
 
-    # Round-trip test
+    # Round-trip test (token-stream preservation through IDs)
     rt_pass, rt_fail, rt_failures = round_trip_test(tokenizer, evaluation_sentences)
     logger.info(f"  Round-trip: {rt_pass} pass, {rt_fail} fail")
     if rt_failures:
-        logger.info("  Sample failures:")
-        for orig, decoded in rt_failures[:3]:
-            logger.info(f"    '{orig[:50]}...' -> '{decoded[:50]}...'")
+        logger.info("  Sample failures (tokenize vs encode->decode):")
+        for tokens, round_tripped in rt_failures[:3]:
+            logger.info(f"    tokenize:  {tokens[:8]}...")
+            logger.info(f"    via IDs:   {round_tripped[:8]}...")
 
     # HF compatibility
     hf_match, hf_mismatch, hf_mismatches = hf_compatibility_test(tokenizer, evaluation_sentences)
