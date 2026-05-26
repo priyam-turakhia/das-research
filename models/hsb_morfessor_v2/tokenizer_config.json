@@ -1,8 +1,0 @@
-{
-  "tokenizer_class": "MorfessorTokenizer",
-  "vocab_size": 15830,
-  "model_type": "morfessor",
-  "auto_map": {
-    "AutoTokenizer": "morfessor.MorfessorHFTokenizer"
-  }
-}

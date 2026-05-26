@@ -1,5 +1,0 @@
-{
-  "model_type": "bpe",
-  "vocab_size": 16000,
-  "tokenizer_class": "SPMBPETokenizer"
-}
