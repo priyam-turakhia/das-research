@@ -1,21 +1,27 @@
 # Upper Sorbian Tokenization Pipeline
 
-Three subword tokenizers — SentencePiece BPE, SentencePiece Unigram, and Morfessor 2.0 — trained on the same Upper Sorbian corpus at the same vocabulary budget (16,000 tokens). The setup is an ablation: same data, same target size, same evaluation, so any downstream performance difference is attributable to the tokenization algorithm itself.
+Four subword tokenizers — SentencePiece BPE, SentencePiece Unigram, Morfessor 2.0, and a Morfessor + BPE hybrid (MorphBPE) — trained on the same Upper Sorbian corpus at the same vocabulary budget (16,000 tokens). The setup is an ablation: same data, same target size, same evaluation, so any downstream performance difference is attributable to the tokenization algorithm itself.
 
-Current version: **v3**. The pipeline cleans the corpus with language identification, length and punctuation filters, applies Moses pretokenization, and trains Morfessor without a special word-boundary marker.
+Current corpus: **lww** (Leipzig + Wiki + Witaj, 1.29M sentences, 21M tokens). An earlier v3 corpus (Leipzig + WMT22) is retained as historical record.
 
 ## Quick start
 
 ```
 uv sync
-uv run python scripts/download_data.py
-uv run python scripts/train.py --method spm_bpe --corpus data/processed/hsb_train.txt --vocab-size 16000 --output models/hsb_spm_bpe_v3
-uv run python scripts/train.py --method spm_unigram --corpus data/processed/hsb_train.txt --vocab-size 16000 --output models/hsb_spm_unigram_v3
-uv run python scripts/train.py --method morfessor --corpus data/processed/hsb_train.txt --vocab-size 16000 --output models/hsb_morfessor_v3
-uv run python scripts/evaluate.py --model-path models/hsb_spm_bpe_v3 --model-path models/hsb_spm_unigram_v3 --model-path models/hsb_morfessor_v3 --corpus data/processed/hsb_dev.txt
+uv run python scripts/download_data.py --sources leipzig wiki witaj --output-suffix lww
+uv run python scripts/train.py --method spm_bpe     --corpus data/processed/hsb_lww_train.txt --vocab-size 16000 --output models/hsb_spm_bpe_lww
+uv run python scripts/train.py --method spm_unigram --corpus data/processed/hsb_lww_train.txt --vocab-size 16000 --output models/hsb_spm_unigram_lww
+uv run python scripts/train.py --method morfessor   --corpus data/processed/hsb_lww_train.txt --vocab-size 16000 --output models/hsb_morfessor_lww
+uv run python scripts/train.py --method morph_bpe   --corpus data/processed/hsb_lww_train.txt --vocab-size 16000 --output models/hsb_morph_bpe_lww
+uv run python scripts/evaluate.py \
+    --model-path models/hsb_spm_bpe_lww \
+    --model-path models/hsb_spm_unigram_lww \
+    --model-path models/hsb_morfessor_lww \
+    --model-path models/hsb_morph_bpe_lww \
+    --corpus data/processed/hsb_lww_dev.txt
 ```
 
-End-to-end wall-clock time is dominated by Morfessor training (~13 min on this corpus). Everything else finishes in under a minute combined.
+End-to-end wall-clock time is dominated by Morfessor training and MorphBPE training (~20 min and ~16 min respectively on the lww corpus). SPM BPE and Unigram each finish in under a minute.
 
 ## Documentation
 

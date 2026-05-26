@@ -1,7 +1,8 @@
 from tokenization.base import BaseTokenizer, SPECIAL_TOKENS
+from tokenization.morfessor import MorfessorTokenizer
+from tokenization.morph_bpe import MorphBPETokenizer
 from tokenization.spm_bpe import SPMBPETokenizer
 from tokenization.spm_unigram import SPMUnigramTokenizer
-from tokenization.morfessor import MorfessorTokenizer
 
 __all__ = [
     "BaseTokenizer",
@@ -9,4 +10,5 @@ __all__ = [
     "SPMBPETokenizer",
     "SPMUnigramTokenizer",
     "MorfessorTokenizer",
+    "MorphBPETokenizer",
 ]

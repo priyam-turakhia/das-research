@@ -15,8 +15,9 @@ WMT22 is 92.8 % a subset of Witaj, hence the swap rather than addition.
 
 * **SentencePiece BPE** and **Unigram**: `sentencepiece.SentencePieceTrainer.train` with `vocab_size=16000`, `model_type` set per subclass, `character_coverage=1.0`, `pad_id=0, unk_id=1, bos_id=-1, eos_id=-1`, `user_defined_symbols=["[PAD]","[CLS]","[SEP]","[MASK]"]`. Implemented in `tokenization/spm_base.py:BaseSPMTokenizer`.
 * **Morfessor 2.0**: `BaselineModel(forcesplit_list=["-"], corpusweight=NumMorphCorpusWeight(num_morph_types=target))` where `target = 16000 − 5 special tokens − len(char inventory)`. `load_data(word_freq_list, count_modifier=lambda c: 1)` (canonical "ones" dampening). `train_batch()` with default `algorithm='recursive'`. Vocabulary built as `[5 specials] + [chars] + [top morphemes by frequency]`. No `▁` boundary marker. Implemented in `tokenization/morfessor.py:MorfessorTokenizer`.
+* **MorphBPE** (hybrid): `BaselineModel(forcesplit_list=["-"])` with no vocabulary budget, `load_data(..., count_modifier=lambda c: 1)`, `train_batch()`. Morfessor's natural larger inventory is used as a fixed pre-segmenter. Corpus is pre-segmented into a temp file (each morpheme a whitespace unit), then SPM BPE trained on it with `vocab_size=16000`, `character_coverage=1.0`, same special-token settings as standalone BPE. Final vocabulary is the BPE vocabulary; Morfessor's morphemes are intermediate. Implemented in `tokenization/morph_bpe.py:MorphBPETokenizer`.
 
-All three apply `moses_pretokenize` inside `tokenize` and `encode`, and `moses_detokenize` inside `decode`. Helper in `tokenization/pretokenize.py` (Moses with `lang='cs'`).
+All four apply `moses_pretokenize` inside `tokenize` and `encode`, and `moses_detokenize` inside `decode`. Helper in `tokenization/pretokenize.py` (Moses with `lang='cs'`).
 
 ## Evaluation
 
@@ -48,16 +49,16 @@ All three tokenizers pass round-trip 1000 / 1000 and HF compatibility 100 / 100 
 
 ### lww (64,452 dev sentences)
 
-| Metric | SPM BPE | SPM Unigram | Morfessor |
-|---|---|---|---|
-| Fertility mean | 1.363 | 1.517 | 1.636 |
-| Fertility std | 0.232 | 0.265 | 0.189 |
-| Vocab size | 15,995 | 15,995 | 15,150 |
-| Unique tokens used | 15,349 | 15,444 | 14,007 |
-| Vocab coverage | 95.9 % | 96.5 % | 92.4 % |
-| OOV rate | 0.01 % | 0.03 % | 0.48 % |
+| Metric | SPM BPE | SPM Unigram | Morfessor | MorphBPE |
+|---|---|---|---|---|
+| Fertility mean | 1.363 | 1.517 | 1.636 | 1.491 |
+| Fertility std | 0.232 | 0.265 | 0.189 | 0.227 |
+| Vocab size | 15,995 | 15,995 | 15,150 | 15,995 |
+| Unique tokens used | 15,349 | 15,444 | 14,007 | 14,861 |
+| Vocab coverage | 95.9 % | 96.5 % | 92.4 % | 92.9 % |
+| OOV rate | 0.01 % | 0.03 % | 0.48 % | 0.01 % |
 
-Raw output: `results/eval_dev_v3.txt`, `results/eval_dev_lww.txt`. Across the two runs, BPE has the shortest sequences, Morfessor the lowest fertility std and the most morphologically motivated splits (e.g. `najwjetšich` as `naj | wjetši | ch`, superlative prefix + stem + case ending).
+Raw output: `results/eval_dev_v3.txt`, `results/eval_dev_lww.txt` (3-way historical), `results/eval_dev_lww_4way.txt` (current with MorphBPE). BPE has the shortest sequences, Morfessor the lowest fertility std and the most morphologically motivated splits (e.g. `najwjetšich` as `naj | wjetši | ch`), MorphBPE sits in between (fertility 1.491, OOV matching BPE at 0.01% via BPE's subword fallback).
 
 ## Code layout
 
@@ -71,4 +72,5 @@ Raw output: `results/eval_dev_v3.txt`, `results/eval_dev_lww.txt`. Across the tw
 | `tokenization/spm_base.py` | `BaseSPMTokenizer`, `SentencePieceHFTokenizer`. |
 | `tokenization/spm_bpe.py`, `spm_unigram.py` | One-line subclasses. |
 | `tokenization/morfessor.py` | `MorfessorTokenizer`, `MorfessorHFTokenizer`, `segment_word_with_vocab`. |
+| `tokenization/morph_bpe.py` | `MorphBPETokenizer`, `MorphBPEHFTokenizer` (hybrid Morfessor + BPE). |
 | `tokenization/evaluate.py` | All metric functions, `EvaluationResult`, `print_comparison_table`. |

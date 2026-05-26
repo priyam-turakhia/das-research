@@ -18,6 +18,7 @@ from tokenization.evaluate import (
     side_by_side_segmentation,
 )
 from tokenization.morfessor import MorfessorTokenizer
+from tokenization.morph_bpe import MorphBPETokenizer
 from tokenization.spm_bpe import SPMBPETokenizer
 from tokenization.spm_unigram import SPMUnigramTokenizer
 
@@ -36,20 +37,23 @@ def detect_tokenizer_type(model_path: Path) -> str:
         with open(config_file, "r") as f:
             config = json.load(f)
             tokenizer_class = config.get("tokenizer_class", "")
+            model_type = config.get("model_type", "")
 
-            if "BPE" in tokenizer_class:
+            if tokenizer_class == "MorphBPETokenizer" or model_type == "morph_bpe":
+                return "morph_bpe"
+            elif "BPE" in tokenizer_class:
                 return "spm_bpe"
             elif "Unigram" in tokenizer_class:
                 return "spm_unigram"
-            elif "Morfessor" in tokenizer_class or config.get("model_type") == "morfessor":
+            elif "Morfessor" in tokenizer_class or model_type == "morfessor":
                 return "morfessor"
 
     # Fallback: check for model files
+    if (model_path / "morfessor_model.pkl").exists() and (model_path / "spm.model").exists():
+        return "morph_bpe"
     if (model_path / "model.pkl").exists():
         return "morfessor"
     elif (model_path / "spm.model").exists():
-        # Check if we can determine BPE vs Unigram from model
-        # Default to BPE if unclear
         return "spm_bpe"
 
     raise ValueError(f"Cannot detect tokenizer type from {model_path}")
@@ -68,6 +72,8 @@ def load_tokenizer(model_path: Path, tokenizer_type: str | None = None) -> BaseT
         tokenizer = SPMUnigramTokenizer()
     elif tokenizer_type == "morfessor":
         tokenizer = MorfessorTokenizer()
+    elif tokenizer_type == "morph_bpe":
+        tokenizer = MorphBPETokenizer()
     else:
         raise ValueError(f"Unknown tokenizer type: {tokenizer_type}")
 
@@ -96,7 +102,7 @@ def main() -> None:
     parser.add_argument(
         "--type",
         type=str,
-        choices=["spm_bpe", "spm_unigram", "morfessor"],
+        choices=["spm_bpe", "spm_unigram", "morfessor", "morph_bpe"],
         help="Override tokenizer type detection.",
     )
 

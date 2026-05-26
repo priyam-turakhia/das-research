@@ -11,6 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from tokenization.morfessor import MorfessorTokenizer
+from tokenization.morph_bpe import MorphBPETokenizer
 from tokenization.spm_bpe import SPMBPETokenizer
 from tokenization.spm_unigram import SPMUnigramTokenizer
 
@@ -24,6 +25,7 @@ TOKENIZER_CLASSES = {
     "spm_bpe": SPMBPETokenizer,
     "spm_unigram": SPMUnigramTokenizer,
     "morfessor": MorfessorTokenizer,
+    "morph_bpe": MorphBPETokenizer,
 }
 
 
