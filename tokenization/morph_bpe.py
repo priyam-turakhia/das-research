@@ -5,7 +5,6 @@ trains on the morpheme stream and compresses to the target vocab size.
 Canonical literature baseline for Morfessor + BPE hybrids.
 """
 
-import json
 import logging
 import os
 import pickle
@@ -15,10 +14,12 @@ from typing import Dict, List, Optional, Tuple
 
 import morfessor
 import sentencepiece as spm
-from transformers import PreTrainedTokenizer
 
-from tokenization.base import SPECIAL_TOKENS, BaseTokenizer
+from tokenization.base import BaseTokenizer
+from tokenization.hf_base import SpmBackedHFTokenizer, apply_default_special_tokens
 from tokenization.pretokenize import moses_detokenize, moses_pretokenize
+from tokenization.registry import write_config
+from tokenization.spm_base import train_spm_model
 
 logger = logging.getLogger(__name__)
 
@@ -35,11 +36,10 @@ def _segment_to_morpheme_stream(model: morfessor.BaselineModel, words: List[str]
     return " ".join(pieces)
 
 
-class MorphBPEHFTokenizer(PreTrainedTokenizer):
+class MorphBPEHFTokenizer(SpmBackedHFTokenizer):
     """HuggingFace-compatible wrapper for the Morfessor + BPE hybrid."""
 
     vocab_files_names = {"morfessor_file": "morfessor_model.pkl", "spm_file": "spm.model"}
-    model_input_names = ["input_ids", "attention_mask"]
 
     def __init__(
         self,
@@ -49,12 +49,7 @@ class MorphBPEHFTokenizer(PreTrainedTokenizer):
         spm_model_bytes: Optional[bytes] = None,
         **kwargs,
     ):
-        kwargs.setdefault("pad_token", "[PAD]")
-        kwargs.setdefault("unk_token", "[UNK]")
-        kwargs.setdefault("cls_token", "[CLS]")
-        kwargs.setdefault("sep_token", "[SEP]")
-        kwargs.setdefault("mask_token", "[MASK]")
-        kwargs.setdefault("clean_up_tokenization_spaces", False)
+        apply_default_special_tokens(kwargs)
 
         if morfessor_model is not None:
             self.morfessor_model = morfessor_model
@@ -77,31 +72,10 @@ class MorphBPEHFTokenizer(PreTrainedTokenizer):
 
         super().__init__(**kwargs)
 
-    @property
-    def vocab_size(self) -> int:
-        return self.sp_model.get_piece_size()
-
-    def get_vocab(self) -> Dict[str, int]:
-        return {
-            self.sp_model.id_to_piece(i): i
-            for i in range(self.sp_model.get_piece_size())
-        }
-
     def _tokenize(self, text: str) -> List[str]:
         words = moses_pretokenize(text).split()
         stream = _segment_to_morpheme_stream(self.morfessor_model, words)
         return self.sp_model.encode(stream, out_type=str)
-
-    def _convert_token_to_id(self, token: str) -> int:
-        return self.sp_model.piece_to_id(token)
-
-    def _convert_id_to_token(self, index: int) -> str:
-        if 0 <= index < self.sp_model.get_piece_size():
-            return self.sp_model.id_to_piece(index)
-        return self.unk_token
-
-    def convert_tokens_to_string(self, tokens: List[str]) -> str:
-        return moses_detokenize(self.sp_model.decode_pieces(tokens))
 
     def save_vocabulary(
         self, save_directory: str, filename_prefix: Optional[str] = None
@@ -124,6 +98,8 @@ class MorphBPETokenizer(BaseTokenizer):
     each word is segmented into morphemes, and SPM BPE is trained on the
     resulting morpheme stream with the target vocabulary size.
     """
+
+    tokenizer_type = "morph_bpe"
 
     def __init__(self) -> None:
         self.morfessor_model: morfessor.BaselineModel | None = None
@@ -169,31 +145,12 @@ class MorphBPETokenizer(BaseTokenizer):
 
         # Step 4: train SPM BPE on the segmented corpus
         logger.info("  Training SPM BPE on morpheme stream...")
-        user_defined_symbols = SPECIAL_TOKENS.copy()
-        user_defined_symbols.remove("[UNK]")
-        with tempfile.TemporaryDirectory() as tmpdir:
-            model_prefix = os.path.join(tmpdir, "spm")
-            spm.SentencePieceTrainer.train(
-                input=segmented_path,
-                model_prefix=model_prefix,
-                vocab_size=vocab_size,
-                model_type="bpe",
-                character_coverage=1.0,
-                user_defined_symbols=user_defined_symbols,
-                pad_id=0,
-                unk_id=1,
-                bos_id=-1,
-                eos_id=-1,
-                pad_piece="[PAD]",
-                unk_piece="[UNK]",
-                train_extremely_large_corpus=False,
-                num_threads=os.cpu_count() or 1,
-            )
+        try:
+            self._spm_bytes = train_spm_model(segmented_path, vocab_size, "bpe")
             self.sp_model = spm.SentencePieceProcessor()
-            self.sp_model.load(f"{model_prefix}.model")
-            with open(f"{model_prefix}.model", "rb") as f:
-                self._spm_bytes = f.read()
-        os.unlink(segmented_path)
+            self.sp_model.load_from_serialized_proto(self._spm_bytes)
+        finally:
+            os.unlink(segmented_path)
 
         logger.info(f"  Trained BPE vocab size: {self.sp_model.get_piece_size()}")
 
@@ -224,13 +181,11 @@ class MorphBPETokenizer(BaseTokenizer):
             pickle.dump(self.morfessor_model, f)
         with open(os.path.join(path, "spm.model"), "wb") as f:
             f.write(self._spm_bytes)
-        config = {
-            "tokenizer_class": "MorphBPETokenizer",
-            "model_type": "morph_bpe",
-            "vocab_size": self.sp_model.get_piece_size(),
-        }
-        with open(os.path.join(path, "tokenizer_config.json"), "w") as f:
-            json.dump(config, f, indent=2)
+        write_config(
+            path,
+            tokenizer_type=self.tokenizer_type,
+            vocab_size=self.sp_model.get_piece_size(),
+        )
         logger.info(f"Saved tokenizer to {path}")
 
     def load(self, path: str) -> None:

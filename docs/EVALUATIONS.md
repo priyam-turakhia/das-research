@@ -2,28 +2,31 @@
 
 This document collects the evaluation numbers across runs, contextualizes them, and records sample segmentations. For raw evaluator output, see the corresponding files in `results/`. For metric definitions, see [METRICS.md](METRICS.md). For the reasoning behind each change, see [CHANGELOG.md](CHANGELOG.md).
 
-There are two kinds of artifacts in this document:
+There are three kinds of artifacts in this document:
 
-- **Versioned rounds (v1, v2, v3)** — successive iterations of the *same* corpus (Leipzig + WMT22) with progressive pipeline improvements. v3 is the current main run.
-- **Alternative corpus experiments (e.g. `lww`)** — parallel runs with *different* source combinations. Useful for measuring how much the choice of training data affects each tokenizer.
+- **Versioned rounds (v1, v2, v3)** — successive iterations of the *same* hsb corpus (Leipzig + WMT22) with progressive pipeline improvements. v3 is the current main hsb run.
+- **Alternative corpus experiments (e.g. `lww`)** — parallel runs with *different* source combinations within the same language. Useful for measuring how much the choice of training data affects each tokenizer.
+- **Cross-language runs (`dsb v1`)** — the Lower Sorbian module's first dataset under the same pipeline. Useful for checking whether per-algorithm conclusions generalize across the two Sorbian variants.
 
 All evaluations are on the held-out dev split. Sentence counts vary because each run uses different source data and filter settings:
 
-- v2 dev: 36,770 sentences (Leipzig + WMT22, less aggressive filtering)
-- v3 dev: 35,179 sentences (Leipzig + WMT22, full v3 pipeline)
-- lww dev: 64,452 sentences (Leipzig + Wiki + Witaj, full v3 pipeline)
+- hsb v2 dev: 36,770 sentences (Leipzig + WMT22, less aggressive filtering)
+- hsb v3 dev: 35,179 sentences (Leipzig + WMT22, full v3 pipeline)
+- hsb lww dev: 64,452 sentences (Leipzig + Wiki + Witaj, full v3 pipeline)
+- dsb v1 dev: 11,965 sentences (Witaj + MT, full v3 pipeline)
 
 Raw evaluator output:
-- [results/eval_dev_v2.txt](../results/eval_dev_v2.txt)
-- [results/eval_dev_v3.txt](../results/eval_dev_v3.txt)
-- [results/eval_dev_lww.txt](../results/eval_dev_lww.txt) — initial 3-way lww run
-- [results/eval_dev_lww_4way.txt](../results/eval_dev_lww_4way.txt) — current 4-way lww run including MorphBPE
+- [results/hsb/eval_dev_v2.txt](../results/hsb/eval_dev_v2.txt)
+- [results/hsb/eval_dev_v3.txt](../results/hsb/eval_dev_v3.txt)
+- [results/hsb/eval_dev_lww.txt](../results/hsb/eval_dev_lww.txt) — initial 3-way lww run
+- [results/hsb/eval_dev_lww_4way.txt](../results/hsb/eval_dev_lww_4way.txt) — current 4-way lww run including MorphBPE
+- [results/dsb/eval_dev_v1_4way.txt](../results/dsb/eval_dev_v1_4way.txt) — dsb 4-way run
 
 ---
 
 ## 1. Current results — v3
 
-Source: [results/eval_dev_v3.txt](../results/eval_dev_v3.txt). Evaluated on 35,179 dev sentences.
+Source: [results/hsb/eval_dev_v3.txt](../results/hsb/eval_dev_v3.txt). Evaluated on 35,179 dev sentences.
 
 | Metric | SPM BPE | SPM Unigram | Morfessor |
 |---|---|---|---|
@@ -51,7 +54,7 @@ None of these numbers alone tells you. Each tokenizer wins a different metric: B
 
 ## 2. v2 results — for comparison
 
-Source: [results/eval_dev_v2.txt](../results/eval_dev_v2.txt). Evaluated on 36,770 dev sentences.
+Source: [results/hsb/eval_dev_v2.txt](../results/hsb/eval_dev_v2.txt). Evaluated on 36,770 dev sentences.
 
 | Metric | SPM BPE | SPM Unigram | Morfessor |
 |---|---|---|---|
@@ -197,7 +200,7 @@ Pairwise corpus overlaps (after pipeline, before merging):
 
 ### Results — 4-way (current)
 
-Source: [results/eval_dev_lww_4way.txt](../results/eval_dev_lww_4way.txt). Evaluated on 64,452 dev sentences.
+Source: [results/hsb/eval_dev_lww_4way.txt](../results/hsb/eval_dev_lww_4way.txt). Evaluated on 64,452 dev sentences.
 
 | Metric | SPM BPE | SPM Unigram | Morfessor | MorphBPE |
 |---|---|---|---|---|
@@ -212,7 +215,7 @@ Source: [results/eval_dev_lww_4way.txt](../results/eval_dev_lww_4way.txt). Evalu
 
 MorphBPE sits exactly where you'd expect: fertility between BPE (1.363) and Morfessor (1.636), at 1.491. Standard deviation similar to BPE (0.227 vs 0.232), since BPE's compression behavior dominates the variance pattern. OOV matches BPE at 0.01 percent because BPE's subword fallback handles anything Morfessor doesn't recognize. Vocab coverage 92.9 percent, slightly above standalone Morfessor — BPE compresses some morpheme sequences into shared tokens, so the same dev set exercises fewer distinct vocabulary entries than for SPM BPE.
 
-The earlier 3-way run (without MorphBPE) is preserved at [results/eval_dev_lww.txt](../results/eval_dev_lww.txt) as historical record.
+The earlier 3-way run (without MorphBPE) is preserved at [results/hsb/eval_dev_lww.txt](../results/hsb/eval_dev_lww.txt) as historical record.
 
 ### v3 vs lww comparison
 
@@ -242,12 +245,115 @@ The fact that the relative behavior of the three tokenizers is stable across two
 
 ---
 
-## 8. What's missing — and what would close the gap
+## 8. Lower Sorbian (`dsb`) — `v1` corpus
+
+A parallel run for Lower Sorbian. Same v3 pipeline, same vocabulary budget (16,000), same evaluation methodology — different language, different (smaller) corpus.
+
+### Corpus composition
+
+- **Witaj** (dsb monolingual): 120,500 raw lines.
+- **MT train + dev** (`train.de-dsb.dsb` + `dev.de-dsb.dsb`, dsb side of de↔dsb MT pair from TUM-NLP `llms-limited-resources2025`): 171,963 + 4,000 raw lines.
+
+After the full v3 pipeline (NFC, control chars, GlotLID at threshold 0.5 with `__label__dsb_Latn`, terminal-punct, length 3–100, Moses, dedup):
+
+- Combined corpus: **239,316 sentences** (3.77M tokens). About one-third the size of hsb v3.
+- Train / dev / test: 215,384 / 11,965 / 11,967.
+
+Exact-line overlap between Witaj and MT train was 0 — the two sources are independent (unlike the hsb side, where Witaj subsumes ~93% of WMT22).
+
+### Results — 4-way
+
+Source: [results/dsb/eval_dev_v1_4way.txt](../results/dsb/eval_dev_v1_4way.txt). Evaluated on 11,965 dev sentences.
+
+| Metric | SPM BPE | SPM Unigram | Morfessor | MorphBPE |
+|---|---|---|---|---|
+| Fertility (mean) | **1.289** | 1.514 | 1.571 | 1.507 |
+| Fertility (std)  | 0.214 | 0.240 | **0.166** | 0.195 |
+| Vocab size       | 15,995 | 15,995 | 15,762 | 15,995 |
+| Unique tokens used | 15,063 | 14,211 | 11,184 | 12,720 |
+| Vocab coverage   | **94.1%** | 88.8% | 70.9% | 79.5% |
+| OOV rate         | **0.00%** | 0.01% | 0.88% | **0.00%** |
+| Round-trip pass  | 1000 / 1000 | 1000 / 1000 | 1000 / 1000 | 1000 / 1000 |
+| HF compatibility | 100 / 100 | 100 / 100 | 100 / 100 | 100 / 100 |
+
+### hsb lww vs dsb v1
+
+| Metric | BPE hsb lww → dsb v1 | Morfessor hsb lww → dsb v1 |
+|---|---|---|
+| Fertility (mean) | 1.363 → 1.289 | 1.636 → 1.571 |
+| OOV rate | 0.01% → 0.00% | 0.48% → 0.88% |
+| Vocab coverage | 95.9% → 94.1% | 92.4% → **70.9%** |
+
+### What the dsb numbers tell us
+
+- **Fertility dropped across the board** (BPE 1.36 → 1.29, Morfessor 1.64 → 1.57). The smaller corpus has more high-frequency whole words that fit a 16k vocab intact, plus dsb morphology trends shorter on average than hsb in this sample. Not a corpus-quality effect — round-trip and HF compat are perfect.
+- **Morfessor OOV roughly doubled** (0.48% → 0.88%). Fewer training tokens per morpheme means more rare morphemes get evicted from the final vocabulary, so the character-fallback path triggers more often on dev. Still under 1%.
+- **Morfessor vocab coverage dropped sharply** (92.4% → 70.9%). Expected: with a smaller dev set the fixed 16k vocab has many entries that never appear. Coverage scales with dev-set size as much as with corpus quality.
+- **BPE and MorphBPE both hit 0.00% OOV.** BPE's subword fallback eliminates character-level fallbacks at the cost of slightly longer sequences. Same pattern as in hsb.
+- **The four-tokenizer ordering is preserved.** BPE shortest, Morfessor lowest std and most morphologically interpretable, MorphBPE between. Same conclusion the hsb v3 / lww comparison reached, now across a language boundary as well as a corpus boundary.
+- **Round-trip and HF compatibility are perfect** for all four tokenizers. The language-agnostic pipeline produced clean tokenizers without per-language adjustment.
+
+### Sample segmentations (test words also seen in the hsb side-by-side table)
+
+The dsb tokenizers were inspected on the same 20 fixed words used for hsb (these are hsb words; some are also valid dsb forms, others are out-of-domain for the dsb training set). Selected examples from [results/dsb/eval_dev_v1_4way.txt](../results/dsb/eval_dev_v1_4way.txt):
+
+`předsydstwom`:
+- BPE: `▁p | ř | ed | sy | d | stwom`
+- Unigram: `▁p | ř | ed | sy | d | stwo | m`
+- Morfessor: `před | sy | d | stwom`
+- MorphBPE: `▁p | ř | ed | ▁s | ▁y | d | ▁stwom`
+
+`zwjazkoweje`:
+- BPE: `▁z | wja | z | koweje`
+- Unigram: `▁z | wja | z | k | oweje`
+- Morfessor: `zwjazk | oweje`
+- MorphBPE: `▁zwja | zk | ▁oweje`
+
+The fragmentation on hsb-only words is visible in the BPE and Unigram rows (more single-char pieces than for native dsb words) — the words aren't in the dsb training distribution, so the subword fallback kicks in. This is the expected behavior, not a defect.
+
+### Caveat
+
+Cross-language comparisons (hsb vs dsb) are observational, not controlled. The corpora differ in size (~5×), source mix, and underlying language. Within-language tokenizer comparisons are unaffected.
+
+### Semi-supervised Morfessor variant
+
+A semi-supervised Morfessor variant (`morfessor_semi_v1`) was trained on the same `data/processed/dsb/v1_train.txt` corpus with 500 word-level `stem ending` annotations extracted from the Apertium Lower Sorbian metadix (`apertium-dsb.dsb.metadix`). `model.set_annotations(annotations)` is called before `train_batch`. An initial attempt kept the baseline's `NumMorphCorpusWeight` setup and barely moved any metric (fertility 1.571 → 1.591, coverage 70.9% → 70.4%); the two adaptive weight updaters (`NumMorphCorpusWeight` and the annotation-weight tuner from `set_annotations`) were fighting each other during training. The current variant drops `NumMorphCorpusWeight`, uses Morfessor's default fixed `corpusweight=1.0`, and lets the annotation tuner adapt alone. The 16k vocabulary budget is enforced by the existing post-hoc top-N morpheme cap. The sample size of 500 was selected by a 13-configuration tuning sweep (sample sizes 100/500/5k/10k/20k × paradigm-balanced/frequency-weighted strategies, plus a weight sub-sweep at 500); see [CHANGELOG.md](CHANGELOG.md) for the sweep observations.
+
+Source: [results/dsb/eval_dev_v1_morfessor_semi.txt](../results/dsb/eval_dev_v1_morfessor_semi.txt). Evaluated on `v1_dev.txt` (11,965 sentences).
+
+| Metric | morfessor_v1 | morfessor_semi_v1 |
+|---|---|---|
+| Fertility (mean) | 1.571 | **1.548** |
+| Fertility (std)  | **0.166** | 0.270 |
+| Vocab size | 15,762 | 15,866 |
+| Unique tokens used | 11,184 | **12,769** |
+| Vocab coverage   | 70.9% | **80.5%** |
+| OOV rate         | 0.88% | **0.72%** |
+| Round-trip / HF compat | 1000/1000, 100/100 | 1000/1000, 100/100 |
+
+### What the dsb semi-supervised numbers tell us
+
+- **Vocab coverage jumped 9.6 pp** (70.9% → 80.5%). The annotations pushed Morfessor toward morphemes that actually appear in real text — substantially more of the learned vocabulary is exercised by the dev set.
+- **OOV dropped ~18% relative** (0.88% → 0.72%). Fewer character fallbacks, matching the coverage gain.
+- **Fertility (mean) is slightly shorter** (1.571 → 1.548). Dropping `NumMorphCorpusWeight` did not blow up the budget — the post-hoc cap held.
+- **Fertility (std) widened** (0.166 → 0.270). The tradeoff: with fewer character fallbacks the length distribution is more bimodal — common dsb words stay short, rare/foreign words still fragment heavily. Whether this hurts downstream depends on the model.
+- **Round-trip and HF compatibility tied at perfect.**
+
+The side-by-side table in the raw eval output shows visibly more fragmentation than the baseline on the 10 hsb sample words used by the evaluator. This is a dsb tokenizer being asked to handle out-of-domain hsb morphology; the in-distribution dsb performance is captured by the numbers above.
+
+### Remaining follow-ups
+
+- Record the annotations path in the saved `tokenizer_config.json` so a future reader can tell which annotation file produced the model.
+- If a richer-than-two-piece annotation source becomes available, the result is likely to improve further.
+
+---
+
+## 9. What's missing — and what would close the gap
 
 Everything in this document is a sanity check. None of these metrics tell you which tokenizer makes a better downstream model. The closing experiment, when someone wants to do it, is:
 
 1. Train a small Transformer language model on each tokenization (same architecture, same training budget, same hyperparameters — so the tokenizer is the only variable).
-2. Evaluate held-out perplexity on `hsb_test.txt`.
+2. Evaluate held-out perplexity on `data/processed/<lang>/<dataset>_test.txt`.
 3. Compare.
 
 A tokenizer with slightly worse fertility might still produce a better model if its tokens are more learnable. The proxy metrics here can't tell you that.

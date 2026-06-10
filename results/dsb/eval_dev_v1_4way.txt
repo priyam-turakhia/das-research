@@ -1,0 +1,198 @@
+PyTorch was not found. Models won't be available and only tokenizers, configuration and file/data utilities can be used.
+2026-06-04 02:20:38,046 - __main__ - INFO - ============================================================
+2026-06-04 02:20:38,046 - __main__ - INFO - Tokenizer Evaluation
+2026-06-04 02:20:38,046 - __main__ - INFO - ============================================================
+2026-06-04 02:20:38,046 - __main__ - INFO - Corpus: data/processed/dsb/v1_dev.txt
+2026-06-04 02:20:38,046 - __main__ - INFO - Models: ['models/dsb/spm_bpe_v1', 'models/dsb/spm_unigram_v1', 'models/dsb/morfessor_v1', 'models/dsb/morph_bpe_v1']
+2026-06-04 02:20:38,046 - __main__ - INFO - ============================================================
+2026-06-04 02:20:38,046 - tokenization.registry - INFO - Loading spm_bpe tokenizer from models/dsb/spm_bpe_v1
+2026-06-04 02:20:38,051 - tokenization.spm_base - INFO - Loaded tokenizer from models/dsb/spm_bpe_v1
+2026-06-04 02:20:38,051 - tokenization.spm_base - INFO -   Vocab size: 16000
+2026-06-04 02:20:38,051 - tokenization.evaluate - INFO - Evaluating spm_bpe_v1...
+2026-06-04 02:20:38,058 - tokenization.evaluate - INFO -   Evaluation sentences: 11965
+2026-06-04 02:20:38,704 - tokenization.evaluate - INFO -   Fertility: 1.289 +/- 0.214
+2026-06-04 02:20:38,711 - tokenization.evaluate - INFO -   Vocab size (excl. special): 15995
+2026-06-04 02:20:39,349 - tokenization.evaluate - INFO -   Unique tokens used: 15,063 (94.1% of vocab)
+2026-06-04 02:20:41,104 - tokenization.evaluate - INFO -   OOV rate: 0.00%
+2026-06-04 02:20:41,207 - tokenization.evaluate - INFO -   Round-trip: 1000 pass, 0 fail
+2026-06-04 02:20:41,239 - tokenization.evaluate - INFO -   HF compatibility: 100 match, 0 mismatch
+2026-06-04 02:20:41,241 - tokenization.registry - INFO - Loading spm_unigram tokenizer from models/dsb/spm_unigram_v1
+2026-06-04 02:20:41,253 - tokenization.spm_base - INFO - Loaded tokenizer from models/dsb/spm_unigram_v1
+2026-06-04 02:20:41,253 - tokenization.spm_base - INFO -   Vocab size: 16000
+2026-06-04 02:20:41,254 - tokenization.evaluate - INFO - Evaluating spm_unigram_v1...
+2026-06-04 02:20:41,260 - tokenization.evaluate - INFO -   Evaluation sentences: 11965
+2026-06-04 02:20:41,728 - tokenization.evaluate - INFO -   Fertility: 1.514 +/- 0.240
+2026-06-04 02:20:41,735 - tokenization.evaluate - INFO -   Vocab size (excl. special): 15995
+2026-06-04 02:20:42,217 - tokenization.evaluate - INFO -   Unique tokens used: 14,211 (88.8% of vocab)
+2026-06-04 02:20:43,843 - tokenization.evaluate - INFO -   OOV rate: 0.01%
+2026-06-04 02:20:43,924 - tokenization.evaluate - INFO -   Round-trip: 1000 pass, 0 fail
+2026-06-04 02:20:43,961 - tokenization.evaluate - INFO -   HF compatibility: 100 match, 0 mismatch
+2026-06-04 02:20:43,963 - tokenization.registry - INFO - Loading morfessor tokenizer from models/dsb/morfessor_v1
+2026-06-04 02:20:44,095 - tokenization.morfessor - INFO - Loaded tokenizer from models/dsb/morfessor_v1
+2026-06-04 02:20:44,095 - tokenization.morfessor - INFO -   Vocab size: 15767
+2026-06-04 02:20:44,095 - tokenization.evaluate - INFO - Evaluating morfessor_v1...
+2026-06-04 02:20:44,101 - tokenization.evaluate - INFO -   Evaluation sentences: 11965
+2026-06-04 02:20:47,516 - tokenization.evaluate - INFO -   Fertility: 1.571 +/- 0.166
+2026-06-04 02:20:47,517 - tokenization.evaluate - INFO -   Vocab size (excl. special): 15762
+2026-06-04 02:20:50,925 - tokenization.evaluate - INFO -   Unique tokens used: 11,184 (70.9% of vocab)
+2026-06-04 02:20:55,326 - tokenization.evaluate - INFO -   OOV rate: 0.88%
+2026-06-04 02:20:55,850 - tokenization.evaluate - INFO -   Round-trip: 1000 pass, 0 fail
+2026-06-04 02:20:55,909 - tokenization.evaluate - INFO -   HF compatibility: 100 match, 0 mismatch
+2026-06-04 02:20:55,911 - tokenization.registry - INFO - Loading morph_bpe tokenizer from models/dsb/morph_bpe_v1
+2026-06-04 02:20:56,085 - tokenization.morph_bpe - INFO - Loaded tokenizer from models/dsb/morph_bpe_v1
+2026-06-04 02:20:56,085 - tokenization.morph_bpe - INFO -   Vocab size: 16000
+2026-06-04 02:20:56,085 - tokenization.evaluate - INFO - Evaluating morph_bpe_v1...
+2026-06-04 02:20:56,091 - tokenization.evaluate - INFO -   Evaluation sentences: 11965
+2026-06-04 02:20:59,747 - tokenization.evaluate - INFO -   Fertility: 1.507 +/- 0.195
+2026-06-04 02:20:59,754 - tokenization.evaluate - INFO -   Vocab size (excl. special): 15995
+2026-06-04 02:21:03,488 - tokenization.evaluate - INFO -   Unique tokens used: 12,720 (79.5% of vocab)
+2026-06-04 02:21:08,492 - tokenization.evaluate - INFO -   OOV rate: 0.00%
+2026-06-04 02:21:09,068 - tokenization.evaluate - INFO -   Round-trip: 1000 pass, 0 fail
+2026-06-04 02:21:09,145 - tokenization.evaluate - INFO -   HF compatibility: 100 match, 0 mismatch
+
+================================================================================
+TOKENIZER COMPARISON
+================================================================================
+
+Note: These metrics are sanity checks only. They do not indicate downstream task performance.
+
+Metric                           spm_bpe_v1    spm_unigram_v1      morfessor_v1      morph_bpe_v1
+-------------------------------------------------------------------------------------------------
+Fertility (mean)                      1.289             1.514             1.571             1.507
+Fertility (std)                       0.214             0.240             0.166             0.195
+Vocab size                           15,995            15,995            15,762            15,995
+Unique tokens used                   15,063            14,211            11,184            12,720
+Vocab coverage                       94.1%            88.8%            70.9%            79.5%
+OOV rate                              0.00%             0.01%             0.88%             0.00%
+Round-trip pass                       1,000             1,000             1,000             1,000
+Round-trip fail                           0                 0                 0                 0
+HF match                                100               100               100               100
+HF mismatch                               0                 0                 0                 0
+
+================================================================================
+SAMPLE SEGMENTATIONS
+================================================================================
+
+dźěłaćerjo:
+       spm_bpe_v1: ▁d | źěła | ć | er | jo
+   spm_unigram_v1: ▁d | źěła | će | rjo
+     morfessor_v1: d | źěła | će | rjo
+     morph_bpe_v1: ▁d | ▁źěła | ▁će | ▁rjo
+
+přewodźowanje:
+       spm_bpe_v1: ▁p | ře | wo | d | źowanje
+   spm_unigram_v1: ▁p | ř | e | wo | dź | owanje
+     morfessor_v1: př | e | wo | dź | owanje
+     morph_bpe_v1: ▁p | ře | ▁wo | ▁d | ź | ▁owanje
+
+najwjetšich:
+       spm_bpe_v1: ▁naj | wje | tš | ich
+   spm_unigram_v1: ▁na | j | wje | tš | ich
+     morfessor_v1: na | j | wje | tš | ich
+     morph_bpe_v1: ▁na | ▁j | w | j | ▁e | tš | ▁i | ▁ch
+
+předstajichu:
+       spm_bpe_v1: ▁p | ř | ed | sta | jich | u
+   spm_unigram_v1: ▁p | ř | ed | sta | jich | u
+     morfessor_v1: před | staji | chu
+     morph_bpe_v1: ▁p | ř | ed | ▁staji | chu
+
+wozjewjenje:
+       spm_bpe_v1: ▁wo | z | je | wjenje
+   spm_unigram_v1: ▁w | o | z | je | wje | nje
+     morfessor_v1: wo | zjew | jenje
+     morph_bpe_v1: ▁wo | ▁z | ▁je | ▁wje | ▁nje
+
+zwjazkoweje:
+       spm_bpe_v1: ▁z | wja | z | koweje
+   spm_unigram_v1: ▁z | wja | z | k | oweje
+     morfessor_v1: zwjazk | oweje
+     morph_bpe_v1: ▁zwja | zk | ▁oweje
+
+towaršnosće:
+       spm_bpe_v1: ▁t | owa | r | šnosć | e
+   spm_unigram_v1: ▁to | war | š | nosć | e
+     morfessor_v1: towa | r | š | nosć | e
+     morph_bpe_v1: ▁towa | ▁r | š | ▁nosć | ▁e
+
+předsydstwom:
+       spm_bpe_v1: ▁p | ř | ed | sy | d | stwom
+   spm_unigram_v1: ▁p | ř | ed | sy | d | stwo | m
+     morfessor_v1: před | sy | d | stwom
+     morph_bpe_v1: ▁p | ř | ed | ▁s | ▁y | d | ▁stwom
+
+wuwiće:
+       spm_bpe_v1: ▁wuwi | će
+   spm_unigram_v1: ▁wuwi | će
+     morfessor_v1: wuwi | će
+     morph_bpe_v1: ▁wuwi | ▁će
+
+přinoški:
+       spm_bpe_v1: ▁p | ři | no | ški
+   spm_unigram_v1: ▁p | ř | in | o | šk | i
+     morfessor_v1: při | no | ški
+     morph_bpe_v1: ▁p | ři | ▁no | ▁ški
+
+================================================================================
+
+Side-by-side comparison:
+
+dźěłaćerjo:
+       spm_bpe_v1: ▁d | źěła | ć | er | jo
+   spm_unigram_v1: ▁d | źěła | će | rjo
+     morfessor_v1: d | źěła | će | rjo
+     morph_bpe_v1: ▁d | ▁źěła | ▁će | ▁rjo
+
+přewodźowanje:
+       spm_bpe_v1: ▁p | ře | wo | d | źowanje
+   spm_unigram_v1: ▁p | ř | e | wo | dź | owanje
+     morfessor_v1: př | e | wo | dź | owanje
+     morph_bpe_v1: ▁p | ře | ▁wo | ▁d | ź | ▁owanje
+
+najwjetšich:
+       spm_bpe_v1: ▁naj | wje | tš | ich
+   spm_unigram_v1: ▁na | j | wje | tš | ich
+     morfessor_v1: na | j | wje | tš | ich
+     morph_bpe_v1: ▁na | ▁j | w | j | ▁e | tš | ▁i | ▁ch
+
+předstajichu:
+       spm_bpe_v1: ▁p | ř | ed | sta | jich | u
+   spm_unigram_v1: ▁p | ř | ed | sta | jich | u
+     morfessor_v1: před | staji | chu
+     morph_bpe_v1: ▁p | ř | ed | ▁staji | chu
+
+wozjewjenje:
+       spm_bpe_v1: ▁wo | z | je | wjenje
+   spm_unigram_v1: ▁w | o | z | je | wje | nje
+     morfessor_v1: wo | zjew | jenje
+     morph_bpe_v1: ▁wo | ▁z | ▁je | ▁wje | ▁nje
+
+zwjazkoweje:
+       spm_bpe_v1: ▁z | wja | z | koweje
+   spm_unigram_v1: ▁z | wja | z | k | oweje
+     morfessor_v1: zwjazk | oweje
+     morph_bpe_v1: ▁zwja | zk | ▁oweje
+
+towaršnosće:
+       spm_bpe_v1: ▁t | owa | r | šnosć | e
+   spm_unigram_v1: ▁to | war | š | nosć | e
+     morfessor_v1: towa | r | š | nosć | e
+     morph_bpe_v1: ▁towa | ▁r | š | ▁nosć | ▁e
+
+předsydstwom:
+       spm_bpe_v1: ▁p | ř | ed | sy | d | stwom
+   spm_unigram_v1: ▁p | ř | ed | sy | d | stwo | m
+     morfessor_v1: před | sy | d | stwom
+     morph_bpe_v1: ▁p | ř | ed | ▁s | ▁y | d | ▁stwom
+
+wuwiće:
+       spm_bpe_v1: ▁wuwi | će
+   spm_unigram_v1: ▁wuwi | će
+     morfessor_v1: wuwi | će
+     morph_bpe_v1: ▁wuwi | ▁će
+
+přinoški:
+       spm_bpe_v1: ▁p | ři | no | ški
+   spm_unigram_v1: ▁p | ř | in | o | šk | i
+     morfessor_v1: při | no | ški
+     morph_bpe_v1: ▁p | ři | ▁no | ▁ški

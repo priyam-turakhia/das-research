@@ -1,7 +1,7 @@
 [project]
 name = "das-research"
 version = "0.1.0"
-description = "Modular tokenization pipeline for Upper Sorbian"
+description = "Modular tokenization pipeline for Upper and Lower Sorbian"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -14,4 +14,7 @@ dependencies = [
     "huggingface-hub>=0.20",
     "fasttext>=0.9.2",
     "numpy<2",
+    "torch>=2.2.0",
+    "datasets>=2.16.0",
+    "accelerate>=1.13.0",
 ]

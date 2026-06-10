@@ -10,10 +10,7 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from tokenization.morfessor import MorfessorTokenizer
-from tokenization.morph_bpe import MorphBPETokenizer
-from tokenization.spm_bpe import SPMBPETokenizer
-from tokenization.spm_unigram import SPMUnigramTokenizer
+from tokenization.registry import get_tokenizer_classes
 
 logging.basicConfig(
     level=logging.INFO,
@@ -21,15 +18,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-TOKENIZER_CLASSES = {
-    "spm_bpe": SPMBPETokenizer,
-    "spm_unigram": SPMUnigramTokenizer,
-    "morfessor": MorfessorTokenizer,
-    "morph_bpe": MorphBPETokenizer,
-}
-
 
 def main() -> None:
+    tokenizer_classes = get_tokenizer_classes()
+
     parser = argparse.ArgumentParser(
         description="Train a tokenizer on a corpus.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -38,14 +30,14 @@ def main() -> None:
         "--method",
         type=str,
         required=True,
-        choices=list(TOKENIZER_CLASSES.keys()),
+        choices=list(tokenizer_classes.keys()),
         help="Tokenization method to use.",
     )
     parser.add_argument(
         "--corpus",
         type=str,
         required=True,
-        help="Path to training corpus (prefer hsb_train.txt when split files exist).",
+        help="Path to training corpus. Prefer the *_train.txt split when split files exist; e.g. data/processed/<lang>/<dataset>_train.txt.",
     )
     parser.add_argument(
         "--vocab-size",
@@ -68,9 +60,15 @@ def main() -> None:
         logger.error(f"Corpus not found: {corpus_path}")
         sys.exit(1)
 
-    if corpus_path.name == "hsb.txt":
-        sibling_train = corpus_path.with_name("hsb_train.txt")
-        sibling_dev = corpus_path.with_name("hsb_dev.txt")
+    # Warn if pointing at an unsplit full corpus file (e.g. v3.txt) when the
+    # _train/_dev sibling splits exist — training on the full corpus
+    # contaminates the dev set.
+    stem = corpus_path.stem
+    if not (
+        stem.endswith("_train") or stem.endswith("_dev") or stem.endswith("_test")
+    ):
+        sibling_train = corpus_path.with_name(f"{stem}_train.txt")
+        sibling_dev = corpus_path.with_name(f"{stem}_dev.txt")
         if sibling_train.exists() and sibling_dev.exists():
             logger.warning(
                 "Using the full corpus for training. Prefer %s so %s stays held out.",
@@ -92,8 +90,7 @@ def main() -> None:
     logger.info("=" * 60)
 
     # Create tokenizer
-    tokenizer_cls = TOKENIZER_CLASSES[args.method]
-    tokenizer = tokenizer_cls()
+    tokenizer = tokenizer_classes[args.method]()
 
     # Train
     start_time = time.time()

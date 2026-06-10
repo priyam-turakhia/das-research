@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Download and preprocess Upper Sorbian monolingual data."""
+"""Download and preprocess Sorbian monolingual data.
+
+The pipeline is language-agnostic. Per-language configuration lives in
+`LANG_REGISTRY` below: source files, download URLs, and the GlotLID label
+the language filter keeps. Add a new language by adding a registry entry.
+"""
 
 import argparse
 import gzip
@@ -9,6 +14,7 @@ import random
 import sys
 import tarfile
 import unicodedata
+from dataclasses import dataclass
 from pathlib import Path
 
 import requests
@@ -24,21 +30,76 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-LEIPZIG_URL = "https://downloads.wortschatz-leipzig.de/corpora/hsb_mixed_2012_300K.tar.gz"
-WMT22_URL = "https://raw.githubusercontent.com/mariondimarco/WMT22_UnsupVeryLowResMT_Data/main/HSB_monolingual.txt.gz"
-
 DATA_DIR = Path(__file__).parent.parent / "data"
-RAW_DIR = DATA_DIR / "raw"
-PROCESSED_DIR = DATA_DIR / "processed"
 
-# Per-source raw archive paths (URL-downloaded sources also have a URL above).
-LEIPZIG_ARCHIVE = RAW_DIR / "hsb_mixed_2012_300K.tar.gz"
-WMT22_ARCHIVE = RAW_DIR / "HSB_monolingual.txt.gz"
-WIKI_FILE = RAW_DIR / "wiki_hsb_monolingual.txt"
-WITAJ_FILE = RAW_DIR / "witaj_hsb_monolingual.txt"
 
-ALL_SOURCES = ("leipzig", "wmt22", "wiki", "witaj")
-DEFAULT_SOURCES = ("leipzig", "wmt22")
+@dataclass(frozen=True)
+class SourceSpec:
+    """How to obtain and extract one raw source file."""
+
+    filename: str
+    extractor: str  # "leipzig" | "wmt22_gz" | "plain"
+    url: str | None = None  # None means the file must be placed manually
+
+
+@dataclass(frozen=True)
+class LangSpec:
+    """Per-language configuration for the preprocessing pipeline."""
+
+    glotlid_label: str
+    sources: dict[str, SourceSpec]
+    default_sources: tuple[str, ...]
+
+
+LANG_REGISTRY: dict[str, LangSpec] = {
+    "hsb": LangSpec(
+        glotlid_label="__label__hsb_Latn",
+        sources={
+            "leipzig": SourceSpec(
+                filename="hsb_mixed_2012_300K.tar.gz",
+                extractor="leipzig",
+                url="https://downloads.wortschatz-leipzig.de/corpora/hsb_mixed_2012_300K.tar.gz",
+            ),
+            "wmt22": SourceSpec(
+                filename="HSB_monolingual.txt.gz",
+                extractor="wmt22_gz",
+                url="https://raw.githubusercontent.com/mariondimarco/WMT22_UnsupVeryLowResMT_Data/main/HSB_monolingual.txt.gz",
+            ),
+            "wiki": SourceSpec(filename="wiki_hsb_monolingual.txt", extractor="plain"),
+            "witaj": SourceSpec(filename="witaj_hsb_monolingual.txt", extractor="plain"),
+        },
+        default_sources=("leipzig", "wmt22"),
+    ),
+    "dsb": LangSpec(
+        glotlid_label="__label__dsb_Latn",
+        sources={
+            "witaj": SourceSpec(filename="witaj_dsb_monolingual.txt", extractor="plain"),
+            "mt_train": SourceSpec(
+                filename="train.de-dsb.dsb",
+                extractor="plain",
+                url="https://raw.githubusercontent.com/TUM-NLP/llms-limited-resources2025/main/Sorbian/dsb/MT/train.de-dsb.dsb",
+            ),
+            "mt_dev": SourceSpec(
+                filename="dev.de-dsb.dsb",
+                extractor="plain",
+                url="https://raw.githubusercontent.com/TUM-NLP/llms-limited-resources2025/main/Sorbian/dsb/MT/dev.de-dsb.dsb",
+            ),
+            "wmt22": SourceSpec(
+                filename="66408_DSB_monolingual.txt.gz",
+                extractor="wmt22_gz",
+            ),
+            "wiki": SourceSpec(
+                filename="8815_DSB_wikipedia_2021.txt.gz",
+                extractor="wmt22_gz",
+            ),
+            "mono": SourceSpec(
+                filename="mono.dsb.gz",
+                extractor="wmt22_gz",
+            ),
+        },
+        default_sources=("witaj", "mt_train", "mt_dev"),
+    ),
+}
 
 ASCII_CONTROL_CHARS = "".join(chr(i) for i in range(32)) + chr(127)
 ASCII_CONTROL_TRANSLATION = str.maketrans("", "", ASCII_CONTROL_CHARS)
@@ -55,7 +116,6 @@ MAX_LENGTH = 100
 TERMINAL_PUNCT = ".!?…»\"'"
 GLOTLID_REPO = "cis-lmu/glotlid"
 GLOTLID_FILENAME = "model.bin"
-GLOTLID_LABEL = "__label__hsb_Latn"
 
 TRAIN_RATIO = 0.90
 DEV_RATIO = 0.05
@@ -282,14 +342,20 @@ def write_sentences(path: Path, sentences: list[str]) -> None:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Download and preprocess the Upper Sorbian corpus.",
+        description="Download and preprocess a Sorbian corpus (hsb or dsb).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    p.add_argument(
+        "--lang",
+        choices=sorted(LANG_REGISTRY),
+        default="hsb",
+        help="Language code. Selects sources, GlotLID label, and output directory.",
     )
     p.add_argument(
         "--glotlid-threshold",
         type=float,
         default=GLOTLID_THRESHOLD,
-        help="Minimum GlotLID confidence to keep a line as Upper Sorbian.",
+        help="Minimum GlotLID confidence to keep a line as the target language.",
     )
     p.add_argument(
         "--min-length",
@@ -317,57 +383,71 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--sources",
         nargs="+",
-        choices=ALL_SOURCES,
-        default=list(DEFAULT_SOURCES),
-        help="Which sources to combine into the corpus.",
+        default=None,
+        help="Which sources to combine into the corpus. Defaults to the "
+             "registry's default_sources for the chosen language.",
     )
     p.add_argument(
         "--output-suffix",
-        default="",
-        help="Optional suffix for output filenames. Empty produces hsb.txt; "
-             "'lww' produces hsb_lww.txt, hsb_lww_train.txt, etc.",
+        default="v3",
+        help="Dataset tag for output filenames under data/processed/<lang>/. "
+             "Default 'v3' produces v3.txt, v3_train.txt, etc.",
     )
     return p.parse_args()
 
 
-def load_source(name: str) -> list[str]:
+def load_source(name: str, spec: SourceSpec, raw_dir: Path) -> list[str]:
     """Download (if needed) and extract sentences for one source."""
-    if name == "leipzig":
-        download_file(LEIPZIG_URL, LEIPZIG_ARCHIVE)
-        return extract_leipzig(LEIPZIG_ARCHIVE)
-    if name == "wmt22":
-        download_file(WMT22_URL, WMT22_ARCHIVE)
-        return extract_wmt22(WMT22_ARCHIVE)
-    if name == "wiki":
-        if not WIKI_FILE.exists():
-            raise FileNotFoundError(f"Wiki file not found: {WIKI_FILE}")
-        return extract_plain(WIKI_FILE, "Wiki")
-    if name == "witaj":
-        if not WITAJ_FILE.exists():
-            raise FileNotFoundError(f"Witaj file not found: {WITAJ_FILE}")
-        return extract_plain(WITAJ_FILE, "Witaj")
-    raise ValueError(f"Unknown source: {name}")
+    path = raw_dir / spec.filename
+    if spec.url is not None:
+        download_file(spec.url, path)
+    elif not path.exists():
+        raise FileNotFoundError(
+            f"Source {name!r} has no download URL and the file is missing: {path}"
+        )
+
+    if spec.extractor == "leipzig":
+        return extract_leipzig(path)
+    if spec.extractor == "wmt22_gz":
+        return extract_wmt22(path)
+    if spec.extractor == "plain":
+        return extract_plain(path, name)
+    raise ValueError(f"Unknown extractor {spec.extractor!r} for source {name!r}")
 
 
 def main() -> None:
     args = parse_args()
 
-    RAW_DIR.mkdir(parents=True, exist_ok=True)
-    PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+    lang_spec = LANG_REGISTRY[args.lang]
+    raw_dir = DATA_DIR / "raw" / args.lang
+    processed_dir = DATA_DIR / "processed" / args.lang
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    processed_dir.mkdir(parents=True, exist_ok=True)
 
-    suffix = f"_{args.output_suffix}" if args.output_suffix else ""
-    output_file = PROCESSED_DIR / f"hsb{suffix}.txt"
-    train_file = PROCESSED_DIR / f"hsb{suffix}_train.txt"
-    dev_file = PROCESSED_DIR / f"hsb{suffix}_dev.txt"
-    test_file = PROCESSED_DIR / f"hsb{suffix}_test.txt"
+    sources = tuple(args.sources) if args.sources else lang_spec.default_sources
+    unknown = [s for s in sources if s not in lang_spec.sources]
+    if unknown:
+        valid = sorted(lang_spec.sources)
+        raise SystemExit(
+            f"Unknown source(s) for --lang {args.lang}: {unknown}. Valid: {valid}"
+        )
 
-    logger.info(f"Sources: {args.sources}")
-    logger.info(f"Output suffix: {args.output_suffix or '(none)'}")
+    # Output files live under data/processed/<lang>/ — the language is the
+    # parent directory, so the filename only carries the dataset tag.
+    dataset = args.output_suffix or "default"
+    output_file = processed_dir / f"{dataset}.txt"
+    train_file = processed_dir / f"{dataset}_train.txt"
+    dev_file = processed_dir / f"{dataset}_dev.txt"
+    test_file = processed_dir / f"{dataset}_test.txt"
+
+    logger.info(f"Language: {args.lang}")
+    logger.info(f"Sources: {list(sources)}")
+    logger.info(f"Output dataset tag: {dataset}")
 
     per_source_counts: dict[str, int] = {}
     all_sentences: list[str] = []
-    for source in args.sources:
-        sents = load_source(source)
+    for source in sources:
+        sents = load_source(source, lang_spec.sources[source], raw_dir)
         per_source_counts[source] = len(sents)
         all_sentences.extend(sents)
 
@@ -385,7 +465,7 @@ def main() -> None:
         glotlid_dropped = 0
     else:
         sentences, glotlid_dropped = filter_language(
-            sentences, args.glotlid_threshold, GLOTLID_LABEL
+            sentences, args.glotlid_threshold, lang_spec.glotlid_label
         )
 
     # 3. Terminal-punctuation filter

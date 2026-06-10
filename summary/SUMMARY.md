@@ -2,14 +2,15 @@
 
 ## Setup
 
-Two parallel runs, same code, same 16,000 vocabulary budget, same v3 pipeline (NFC, control char strip, boilerplate drop, GlotLID `__label__hsb_Latn` ≥ 0.5, terminal punctuation `.!?…»"'`, length 3 to 100 whitespace words, Moses pretokenization, dedup, 90 / 5 / 5 split with seed 42).
+Same code, same 16,000 vocabulary budget, same v3 pipeline (NFC, control char strip, boilerplate drop, GlotLID `__label__<lang>_Latn` ≥ 0.5, terminal punctuation `.!?…»"'`, length 3 to 100 whitespace words, Moses pretokenization with `lang='cs'`, dedup, 90 / 5 / 5 split with seed 42). Per-language configuration (sources, GlotLID label, output dir) lives in `LANG_REGISTRY` at the top of `scripts/download_data.py`; selecting the language is `--lang {hsb,dsb}`.
 
-| Run | Sources | Sentences | Tokens | Train | Dev | Test |
-|---|---|---|---|---|---|---|
-| v3 | Leipzig + WMT22 | 703,595 | 11,416,063 | 633,235 | 35,179 | 35,181 |
-| lww | Leipzig + Wiki + Witaj | 1,289,047 | 21,066,230 | 1,160,142 | 64,452 | 64,453 |
+| Lang | Run | Sources | Sentences | Tokens | Train | Dev | Test |
+|---|---|---|---|---|---|---|---|
+| hsb | v3 | Leipzig + WMT22 | 703,595 | 11,416,063 | 633,235 | 35,179 | 35,181 |
+| hsb | lww | Leipzig + Wiki + Witaj | 1,289,047 | 21,066,230 | 1,160,142 | 64,452 | 64,453 |
+| dsb | v1 | Witaj + MT (de↔dsb train + dev) | 239,316 | 3,770,578 | 215,384 | 11,965 | 11,967 |
 
-WMT22 is 92.8 % a subset of Witaj, hence the swap rather than addition.
+WMT22 is 92.8 % a subset of Witaj on hsb, hence the swap rather than addition. On dsb the two sources (Witaj, MT) have 0 exact-line overlap.
 
 ## Tokenizer training
 
@@ -34,9 +35,9 @@ All four apply `moses_pretokenize` inside `tokenize` and `encode`, and `moses_de
 
 ## Results
 
-All three tokenizers pass round-trip 1000 / 1000 and HF compatibility 100 / 100 in both runs.
+All tokenizers pass round-trip 1000 / 1000 and HF compatibility 100 / 100 in every run.
 
-### v3 (35,179 dev sentences)
+### hsb v3 (35,179 dev sentences)
 
 | Metric | SPM BPE | SPM Unigram | Morfessor |
 |---|---|---|---|
@@ -47,7 +48,7 @@ All three tokenizers pass round-trip 1000 / 1000 and HF compatibility 100 / 100 
 | Vocab coverage | 98.5 % | 99.0 % | 89.5 % |
 | OOV rate | 0.00 % | 0.03 % | 0.27 % |
 
-### lww (64,452 dev sentences)
+### hsb lww (64,452 dev sentences)
 
 | Metric | SPM BPE | SPM Unigram | Morfessor | MorphBPE |
 |---|---|---|---|---|
@@ -58,19 +59,55 @@ All three tokenizers pass round-trip 1000 / 1000 and HF compatibility 100 / 100 
 | Vocab coverage | 95.9 % | 96.5 % | 92.4 % | 92.9 % |
 | OOV rate | 0.01 % | 0.03 % | 0.48 % | 0.01 % |
 
-Raw output: `results/eval_dev_v3.txt`, `results/eval_dev_lww.txt` (3-way historical), `results/eval_dev_lww_4way.txt` (current with MorphBPE). BPE has the shortest sequences, Morfessor the lowest fertility std and the most morphologically motivated splits (e.g. `najwjetšich` as `naj | wjetši | ch`), MorphBPE sits in between (fertility 1.491, OOV matching BPE at 0.01% via BPE's subword fallback).
+### dsb v1 (11,965 dev sentences)
+
+| Metric | SPM BPE | SPM Unigram | Morfessor | MorphBPE |
+|---|---|---|---|---|
+| Fertility mean | 1.289 | 1.514 | 1.571 | 1.507 |
+| Fertility std | 0.214 | 0.240 | 0.166 | 0.195 |
+| Vocab size | 15,995 | 15,995 | 15,762 | 15,995 |
+| Unique tokens used | 15,063 | 14,211 | 11,184 | 12,720 |
+| Vocab coverage | 94.1 % | 88.8 % | 70.9 % | 79.5 % |
+| OOV rate | 0.00 % | 0.01 % | 0.88 % | 0.00 % |
+
+Raw output: `results/hsb/eval_dev_v3.txt`, `results/hsb/eval_dev_lww.txt` (3-way historical), `results/hsb/eval_dev_lww_4way.txt` (current with MorphBPE), `results/dsb/eval_dev_v1_4way.txt`. BPE has the shortest sequences, Morfessor the lowest fertility std and the most morphologically motivated splits (e.g. `najwjetšich` as `naj | wjetši | ch`), MorphBPE sits in between. The four-tokenizer ordering is preserved across hsb v3, hsb lww, and dsb v1 — the per-algorithm conclusions generalize across both corpus choice and language. Morfessor coverage drops sharply on dsb v1 (70.9 %) because the smaller dev set exercises a smaller fraction of the fixed 16k vocabulary.
+
+### dsb v1 — semi-supervised Morfessor variant
+
+A `SemiSupervisedMorfessorTokenizer` (`tokenization/morfessor_semi.py`) was trained on the same `v1_train.txt` corpus with 500 `stem ending` annotations extracted from the Apertium Lower Sorbian metadix (`apertium-dsb.dsb.metadix`) by `scripts/extract_dsb_morph_annotations.py`. `model.set_annotations(annotations)` is called before `train_batch`. An initial attempt kept `NumMorphCorpusWeight` and produced no meaningful change because the two adaptive tuners fought each other; the current variant drops `NumMorphCorpusWeight`, uses Morfessor's default fixed `corpusweight=1.0`, and enforces the 16k budget with the existing post-hoc cap. Sample size 500 was selected by a 13-configuration tuning sweep (see CHANGELOG). Output: `results/dsb/eval_dev_v1_morfessor_semi.txt`.
+
+| Metric | morfessor_v1 | morfessor_semi_v1 |
+|---|---|---|
+| Fertility mean | 1.571 | **1.548** |
+| Fertility std | **0.166** | 0.270 |
+| Vocab size | 15,762 | 15,866 |
+| Unique tokens used | 11,184 | **12,769** |
+| Vocab coverage | 70.9 % | **80.5 %** |
+| OOV rate | 0.88 % | **0.72 %** |
+| Round-trip / HF | 1000/1000, 100/100 | 1000/1000, 100/100 |
+
+Coverage +9.6 pp, OOV −18% relative, fertility mean slightly shorter. Fertility std widened (the one tradeoff: with fewer character fallbacks the length distribution becomes more bimodal — common dsb words stay short, rare/foreign words still fragment). Open follow-up: record the annotations path in the saved `tokenizer_config.json` for reproducibility, and try a richer-than-two-piece annotation source if one becomes available.
 
 ## Code layout
 
 | File | Contents |
 |---|---|
-| `scripts/download_data.py` | Source download, full filter pipeline, splitter. Flags: `--sources`, `--output-suffix`, `--glotlid-threshold`, `--min-length`, `--max-length`, `--terminal-punct`, `--skip-glotlid`. |
+| `scripts/download_data.py` | Source download, full filter pipeline, splitter. `LANG_REGISTRY` at the top maps `--lang` to sources, GlotLID label, defaults. Flags: `--lang`, `--sources`, `--output-suffix`, `--glotlid-threshold`, `--min-length`, `--max-length`, `--terminal-punct`, `--skip-glotlid`. |
 | `scripts/train.py` | Single tokenizer training entry point. Flags: `--method`, `--corpus`, `--vocab-size`, `--output`. |
 | `scripts/evaluate.py` | Multi-tokenizer evaluation entry point. Flags: `--model-path` (repeatable), `--corpus`, `--type`. |
 | `tokenization/base.py` | `BaseTokenizer` abstract class, `SPECIAL_TOKENS`. |
 | `tokenization/pretokenize.py` | `moses_pretokenize`, `moses_detokenize`. |
 | `tokenization/spm_base.py` | `BaseSPMTokenizer`, `SentencePieceHFTokenizer`. |
 | `tokenization/spm_bpe.py`, `spm_unigram.py` | One-line subclasses. |
-| `tokenization/morfessor.py` | `MorfessorTokenizer`, `MorfessorHFTokenizer`, `segment_word_with_vocab`. |
+| `tokenization/morfessor.py` | `MorfessorTokenizer`, `MorfessorHFTokenizer`, `segment_word_with_vocab`. `train()` accepts an optional `annotations_path` for semi-supervised use. |
+| `tokenization/morfessor_semi.py` | `SemiSupervisedMorfessorTokenizer` — thin subclass that wires a default annotations TSV through to the parent's `train()`. dsb-specific by default. |
 | `tokenization/morph_bpe.py` | `MorphBPETokenizer`, `MorphBPEHFTokenizer` (hybrid Morfessor + BPE). |
+| `scripts/extract_dsb_morph_annotations.py` | Extracts `surface\tstem ending` rows from an Apertium metadix; produces full and paradigm-balanced sampled TSVs. |
+| `scripts/pretrain.py` | XLM-R-base MLM pretraining using any trained tokenizer. `--smoke` for laptop validation. Eval reports loss, perplexity, top-1/top-5 accuracy, bits per character. Encoder is intended as the student in a later cross-lingual embedding distillation step. |
+| `tokenization/hf_base.py` | `BaseHFTokenizer` and `SpmBackedHFTokenizer` — shared special-token handling (`[CLS]…[SEP]` wrapping, special-tokens mask, segment IDs) inherited by every HF wrapper. |
+| `tokenization/registry.py` | `TOKENIZER_TYPES`, `load_tokenizer()`, `detect_tokenizer_type()`, `write_config()`, `read_config()` — single source of truth for tokenizer dispatch and the `tokenizer_config.json` schema. |
 | `tokenization/evaluate.py` | All metric functions, `EvaluationResult`, `print_comparison_table`. |
+
+## MLM pretraining
+
+`scripts/pretrain.py` trains an XLM-RoBERTa-base-shaped encoder from random init using any one of the 5 trained tokenizers. Same code path runs as a `--smoke` test on a laptop (tiny 2-layer model, MPS, ~10 s) and as the real training run on a CUDA GPU (12-layer / 768-hidden / ~110 M params, bf16). Eval reports `eval_loss`, perplexity, top-1/top-5 accuracy at masked positions, and **bits per character** — the last being the tokenization-invariant metric for comparing the 5 tokenizers at downstream LM quality. The resulting encoder is intended as the student in a later cross-lingual embedding distillation step against stock `FacebookAI/xlm-roberta-base`; MLM here is a sensible init, not the final training step. Bringing this online required fixing `BaseHFTokenizer` to wrap inputs with `[CLS]…[SEP]` and produce a correct special-tokens mask — all 5 tokenizers now do so.

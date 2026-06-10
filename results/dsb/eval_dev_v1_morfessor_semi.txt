@@ -1,0 +1,137 @@
+warning: `VIRTUAL_ENV=/opt/homebrew/opt/python@3.13/Frameworks/Python.framework/Versions/3.13` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+PyTorch was not found. Models won't be available and only tokenizers, configuration and file/data utilities can be used.
+2026-06-09 14:33:03,064 - __main__ - INFO - ============================================================
+2026-06-09 14:33:03,064 - __main__ - INFO - Tokenizer Evaluation
+2026-06-09 14:33:03,064 - __main__ - INFO - ============================================================
+2026-06-09 14:33:03,064 - __main__ - INFO - Corpus: data/processed/dsb/v1_dev.txt
+2026-06-09 14:33:03,064 - __main__ - INFO - Models: ['models/dsb/morfessor_v1', 'models/dsb/morfessor_semi_v1']
+2026-06-09 14:33:03,064 - __main__ - INFO - ============================================================
+2026-06-09 14:33:03,064 - tokenization.registry - INFO - Loading morfessor tokenizer from models/dsb/morfessor_v1
+2026-06-09 14:33:03,196 - tokenization.morfessor - INFO - Loaded tokenizer from models/dsb/morfessor_v1
+2026-06-09 14:33:03,196 - tokenization.morfessor - INFO -   Vocab size: 15767
+2026-06-09 14:33:03,196 - tokenization.evaluate - INFO - Evaluating morfessor_v1...
+2026-06-09 14:33:03,204 - tokenization.evaluate - INFO -   Evaluation sentences: 11965
+2026-06-09 14:33:06,529 - tokenization.evaluate - INFO -   Fertility: 1.571 +/- 0.166
+2026-06-09 14:33:06,530 - tokenization.evaluate - INFO -   Vocab size (excl. special): 15762
+2026-06-09 14:33:09,761 - tokenization.evaluate - INFO -   Unique tokens used: 11,184 (70.9% of vocab)
+2026-06-09 14:33:14,342 - tokenization.evaluate - INFO -   OOV rate: 0.88%
+2026-06-09 14:33:14,870 - tokenization.evaluate - INFO -   Round-trip: 1000 pass, 0 fail
+2026-06-09 14:33:14,929 - tokenization.evaluate - INFO -   HF compatibility: 100 match, 0 mismatch
+2026-06-09 14:33:14,931 - tokenization.registry - INFO - Loading morfessor_semi tokenizer from models/dsb/morfessor_semi_v1
+2026-06-09 14:33:15,103 - tokenization.morfessor - INFO - Loaded tokenizer from models/dsb/morfessor_semi_v1
+2026-06-09 14:33:15,103 - tokenization.morfessor - INFO -   Vocab size: 15871
+2026-06-09 14:33:15,103 - tokenization.evaluate - INFO - Evaluating morfessor_semi_v1...
+2026-06-09 14:33:15,111 - tokenization.evaluate - INFO -   Evaluation sentences: 11965
+2026-06-09 14:33:18,282 - tokenization.evaluate - INFO -   Fertility: 1.548 +/- 0.270
+2026-06-09 14:33:18,283 - tokenization.evaluate - INFO -   Vocab size (excl. special): 15866
+2026-06-09 14:33:21,502 - tokenization.evaluate - INFO -   Unique tokens used: 12,769 (80.5% of vocab)
+2026-06-09 14:33:25,795 - tokenization.evaluate - INFO -   OOV rate: 0.72%
+2026-06-09 14:33:26,294 - tokenization.evaluate - INFO -   Round-trip: 1000 pass, 0 fail
+2026-06-09 14:33:26,351 - tokenization.evaluate - INFO -   HF compatibility: 100 match, 0 mismatch
+
+================================================================================
+TOKENIZER COMPARISON
+================================================================================
+
+Note: These metrics are sanity checks only. They do not indicate downstream task performance.
+
+Metric                          morfessor_v1  morfessor_semi_v1
+---------------------------------------------------------------
+Fertility (mean)                       1.571              1.548
+Fertility (std)                        0.166              0.270
+Vocab size                            15,762             15,866
+Unique tokens used                    11,184             12,769
+Vocab coverage                        70.9%             80.5%
+OOV rate                               0.88%              0.72%
+Round-trip pass                        1,000              1,000
+Round-trip fail                            0                  0
+HF match                                 100                100
+HF mismatch                                0                  0
+
+================================================================================
+SAMPLE SEGMENTATIONS
+================================================================================
+
+dźěłaćerjo:
+     morfessor_v1: d | źěła | će | rjo
+  morfessor_semi_v1: d | źěła | će | rjo
+
+přewodźowanje:
+     morfessor_v1: př | e | wo | dź | owanje
+  morfessor_semi_v1: p | ř | e | wo | d | ź | o | w | a | n | je
+
+najwjetšich:
+     morfessor_v1: na | j | wje | tš | ich
+  morfessor_semi_v1: na | j | wjet | ši | ch
+
+předstajichu:
+     morfessor_v1: před | staji | chu
+  morfessor_semi_v1: p | ř | e | d | staji | chu
+
+wozjewjenje:
+     morfessor_v1: wo | zjew | jenje
+  morfessor_semi_v1: wo | z | je | wje | nje
+
+zwjazkoweje:
+     morfessor_v1: zwjazk | oweje
+  morfessor_semi_v1: z | w | j | a | z | k | oweje
+
+towaršnosće:
+     morfessor_v1: towa | r | š | nosć | e
+  morfessor_semi_v1: tow | a | r | š | nosć | e
+
+předsydstwom:
+     morfessor_v1: před | sy | d | stwom
+  morfessor_semi_v1: p | ř | e | d | sy | d | stwom
+
+wuwiće:
+     morfessor_v1: wuwi | će
+  morfessor_semi_v1: wuwi | će
+
+přinoški:
+     morfessor_v1: při | no | ški
+  morfessor_semi_v1: p | ř | i | no | š | ki
+
+================================================================================
+
+Side-by-side comparison:
+
+dźěłaćerjo:
+     morfessor_v1: d | źěła | će | rjo
+  morfessor_semi_v1: d | źěła | će | rjo
+
+přewodźowanje:
+     morfessor_v1: př | e | wo | dź | owanje
+  morfessor_semi_v1: p | ř | e | wo | d | ź | o | w | a | n | je
+
+najwjetšich:
+     morfessor_v1: na | j | wje | tš | ich
+  morfessor_semi_v1: na | j | wjet | ši | ch
+
+předstajichu:
+     morfessor_v1: před | staji | chu
+  morfessor_semi_v1: p | ř | e | d | staji | chu
+
+wozjewjenje:
+     morfessor_v1: wo | zjew | jenje
+  morfessor_semi_v1: wo | z | je | wje | nje
+
+zwjazkoweje:
+     morfessor_v1: zwjazk | oweje
+  morfessor_semi_v1: z | w | j | a | z | k | oweje
+
+towaršnosće:
+     morfessor_v1: towa | r | š | nosć | e
+  morfessor_semi_v1: tow | a | r | š | nosć | e
+
+předsydstwom:
+     morfessor_v1: před | sy | d | stwom
+  morfessor_semi_v1: p | ř | e | d | sy | d | stwom
+
+wuwiće:
+     morfessor_v1: wuwi | će
+  morfessor_semi_v1: wuwi | će
+
+přinoški:
+     morfessor_v1: při | no | ški
+  morfessor_semi_v1: p | ř | i | no | š | ki

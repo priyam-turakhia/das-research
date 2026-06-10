@@ -5,15 +5,27 @@ import logging
 import os
 import pickle
 from collections import Counter
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import morfessor
-from transformers import PreTrainedTokenizer
 
 from tokenization.base import SPECIAL_TOKENS, BaseTokenizer
+from tokenization.hf_base import BaseHFTokenizer, apply_default_special_tokens
 from tokenization.pretokenize import moses_detokenize, moses_pretokenize
+from tokenization.registry import write_config
 
 logger = logging.getLogger(__name__)
+
+
+def load_morfessor_annotations(path: str | Path) -> dict[str, list[tuple[str, ...]]]:
+    """Load TSV annotations in the structure expected by Morfessor."""
+    annotations: dict[str, list[tuple[str, ...]]] = {}
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            surface, morph_text = line.rstrip("\n").split("\t", 1)
+            annotations[surface] = [tuple(morph_text.split())]
+    return annotations
 
 
 def segment_word_with_vocab(
@@ -38,7 +50,7 @@ def segment_word_with_vocab(
     return result
 
 
-class MorfessorHFTokenizer(PreTrainedTokenizer):
+class MorfessorHFTokenizer(BaseHFTokenizer):
     """HuggingFace-compatible wrapper for Morfessor tokenizer.
 
     This is a slow tokenizer (not Fast) because Morfessor segmentation
@@ -46,7 +58,6 @@ class MorfessorHFTokenizer(PreTrainedTokenizer):
     """
 
     vocab_files_names = {"vocab_file": "vocab.json", "model_file": "model.pkl"}
-    model_input_names = ["input_ids", "attention_mask"]
 
     def __init__(
         self,
@@ -56,13 +67,7 @@ class MorfessorHFTokenizer(PreTrainedTokenizer):
         model: Optional[morfessor.BaselineModel] = None,
         **kwargs,
     ):
-        # Set special tokens before calling super().__init__
-        kwargs.setdefault("pad_token", "[PAD]")
-        kwargs.setdefault("unk_token", "[UNK]")
-        kwargs.setdefault("cls_token", "[CLS]")
-        kwargs.setdefault("sep_token", "[SEP]")
-        kwargs.setdefault("mask_token", "[MASK]")
-        kwargs.setdefault("clean_up_tokenization_spaces", False)
+        apply_default_special_tokens(kwargs)
 
         # Load vocab and model from files if not provided directly
         if vocab is not None:
@@ -148,13 +153,28 @@ class MorfessorTokenizer(BaseTokenizer):
     that ends up outside the final vocabulary.
     """
 
+    tokenizer_type = "morfessor"
+
     def __init__(self) -> None:
         self.model: morfessor.BaselineModel | None = None
         self.vocab: Dict[str, int] = {}
         self.ids_to_tokens: Dict[int, str] = {}
 
-    def train(self, corpus_path: str, vocab_size: int) -> None:
-        """Train Morfessor model and build the vocabulary."""
+    def train(
+        self,
+        corpus_path: str,
+        vocab_size: int,
+        annotations_path: str | None = None,
+        use_num_morph_weight: bool = True,
+    ) -> None:
+        """Train Morfessor model and build the vocabulary.
+
+        `use_num_morph_weight=True` (default) wires Morfessor's `NumMorphCorpusWeight`
+        updater so α auto-tunes during training to hit the target morpheme-type budget.
+        Subclasses that combine training-time supervision (`set_annotations`) with a
+        weight tuner can pass `False` to keep α fixed and avoid the two updaters
+        adapting against each other; the post-hoc cap below still enforces the budget.
+        """
         logger.info("Training Morfessor model...")
         logger.info(f"  Corpus: {corpus_path}")
         logger.info(f"  Target vocab size: {vocab_size}")
@@ -176,8 +196,8 @@ class MorfessorTokenizer(BaseTokenizer):
         logger.info(f"  Found {len(word_counts)} unique words")
 
         # Target morpheme count: vocab_size minus special tokens and character slots.
-        # Morfessor self-tunes its corpus weight (α) during training to hit this budget,
-        # rather than us post-hoc capping a larger lexicon.
+        # Morfessor self-tunes its corpus weight (α) during training to hit this budget
+        # when use_num_morph_weight is True; otherwise the post-hoc cap below enforces it.
         target_morphs = vocab_size - len(SPECIAL_TOKENS) - len(char_inventory)
         logger.info(f"  Target morpheme types: {target_morphs}")
 
@@ -185,12 +205,17 @@ class MorfessorTokenizer(BaseTokenizer):
         # - forcesplit_list=['-']: always split hyphens (CLI default)
         # - NumMorphCorpusWeight: auto-tune α during training to target a morpheme budget
         logger.info("  Training Morfessor model...")
-        self.model = morfessor.BaselineModel(
-            forcesplit_list=["-"],
-            corpusweight=morfessor.baseline.NumMorphCorpusWeight(
-                num_morph_types=target_morphs
-            ),
-        )
+        if use_num_morph_weight:
+            self.model = morfessor.BaselineModel(
+                forcesplit_list=["-"],
+                corpusweight=morfessor.baseline.NumMorphCorpusWeight(
+                    num_morph_types=target_morphs
+                ),
+            )
+        else:
+            # Fixed α (Morfessor default 1.0). Used when a second updater (e.g. the
+            # annotation-weight tuner from set_annotations) needs to adapt alone.
+            self.model = morfessor.BaselineModel(forcesplit_list=["-"])
 
         # count_modifier=lambda c: 1 implements the canonical "ones" count dampening.
         # Every word type contributes equally regardless of frequency, preventing
@@ -198,6 +223,11 @@ class MorfessorTokenizer(BaseTokenizer):
         logger.info(f"  Loading {len(word_counts)} word types...")
         word_freq_list = [(count, word) for word, count in word_counts.items()]
         self.model.load_data(word_freq_list, count_modifier=lambda c: 1)
+
+        if annotations_path is not None:
+            annotations = load_morfessor_annotations(annotations_path)
+            logger.info(f"  Loading {len(annotations)} supervised annotations: {annotations_path}")
+            self.model.set_annotations(annotations)
 
         # Train the model
         self.model.train_batch()
@@ -318,28 +348,20 @@ class MorfessorTokenizer(BaseTokenizer):
 
         os.makedirs(path, exist_ok=True)
 
-        # Save Morfessor model
         model_file = os.path.join(path, "model.pkl")
         with open(model_file, "wb") as f:
             pickle.dump(self.model, f)
 
-        # Save vocabulary
         vocab_file = os.path.join(path, "vocab.json")
         with open(vocab_file, "w", encoding="utf-8") as f:
             json.dump(self.vocab, f, ensure_ascii=False, indent=2)
 
-        # Save config for loading and HF compatibility
-        config = {
-            "tokenizer_class": "MorfessorTokenizer",
-            "vocab_size": len(self.vocab),
-            "model_type": "morfessor",
-            "auto_map": {
-                "AutoTokenizer": "morfessor.MorfessorHFTokenizer",
-            },
-        }
-        config_file = os.path.join(path, "tokenizer_config.json")
-        with open(config_file, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2)
+        write_config(
+            path,
+            tokenizer_type=self.tokenizer_type,
+            vocab_size=len(self.vocab),
+            auto_map={"AutoTokenizer": "morfessor.MorfessorHFTokenizer"},
+        )
 
         logger.info(f"Saved tokenizer to {path}")
 

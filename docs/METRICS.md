@@ -139,7 +139,7 @@ A passing test means: the two paths from text to token-string list (the direct `
 
 This metric is structurally weaker than the alternative "encode then decode then compare to text" round-trip. For Morfessor specifically, `encode` is implemented as `[vocab[t] for t in tokenize(text)]` — meaning `tokenize` and `[vocab_lookup[id] for id in encode(text)]` are tautologically equal as long as the vocabulary map itself is correct. The test cannot fail unless the vocab is broken. For SentencePiece the test is meaningful but narrow: `tokenize` and `encode` are independent calls into the C++ library (one with `out_type=str`, the other with `out_type=int`), so the test catches the unlikely case where those two paths disagree.
 
-What this metric does NOT verify is the original semantic round-trip — that `decode(encode(text))` recovers the original text. SentencePiece still passes that stronger property in practice; Morfessor cannot, by design (its flat ID stream does not carry word-boundary information; see [CHANGELOG.md](CHANGELOG.md)). When the eval reports 1000/1000 across all three tokenizers, the SPM rows reflect both checks; the Morfessor row reflects only the weak vocab-consistency check.
+What this metric does NOT verify is the original semantic round-trip — that `decode(encode(text))` recovers the original text. SentencePiece still passes that stronger property in practice; Morfessor cannot, by design (its flat ID stream does not carry word-boundary information; see [CHANGELOG.md](CHANGELOG.md)). When the eval reports 1000/1000 across all four tokenizers, the SPM and MorphBPE rows reflect both checks (MorphBPE's final encoding is SPM-BPE); the Morfessor row reflects only the weak vocab-consistency check.
 
 The right way to report this honestly:
 - **SPM**: passes the strong text-equality round-trip.
@@ -182,7 +182,7 @@ Downstream model training pipelines typically use a HuggingFace tokenizer object
 
 ### What it counts
 
-This is not a numeric metric. It runs each tokenizer on a fixed list of 20 morphologically interesting Upper Sorbian words and prints the segmentations side-by-side, for human inspection.
+This is not a numeric metric. It runs each tokenizer on a fixed list of 20 morphologically interesting Upper Sorbian words and prints the segmentations side-by-side, for human inspection. The same word list is used for the dsb tokenizers — these are hsb words, so for dsb tokenizers the table also shows how the language-agnostic algorithms handle out-of-domain morphology.
 
 ### Exactly how the code computes it
 

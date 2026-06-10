@@ -2,7 +2,6 @@
 """Evaluate tokenizer(s) on a corpus."""
 
 import argparse
-import json
 import logging
 import sys
 from pathlib import Path
@@ -17,68 +16,13 @@ from tokenization.evaluate import (
     print_comparison_table,
     side_by_side_segmentation,
 )
-from tokenization.morfessor import MorfessorTokenizer
-from tokenization.morph_bpe import MorphBPETokenizer
-from tokenization.spm_bpe import SPMBPETokenizer
-from tokenization.spm_unigram import SPMUnigramTokenizer
+from tokenization.registry import TOKENIZER_TYPES, load_tokenizer
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
-
-
-def detect_tokenizer_type(model_path: Path) -> str:
-    """Auto-detect tokenizer type from saved files."""
-    config_file = model_path / "tokenizer_config.json"
-
-    if config_file.exists():
-        with open(config_file, "r") as f:
-            config = json.load(f)
-            tokenizer_class = config.get("tokenizer_class", "")
-            model_type = config.get("model_type", "")
-
-            if tokenizer_class == "MorphBPETokenizer" or model_type == "morph_bpe":
-                return "morph_bpe"
-            elif "BPE" in tokenizer_class:
-                return "spm_bpe"
-            elif "Unigram" in tokenizer_class:
-                return "spm_unigram"
-            elif "Morfessor" in tokenizer_class or model_type == "morfessor":
-                return "morfessor"
-
-    # Fallback: check for model files
-    if (model_path / "morfessor_model.pkl").exists() and (model_path / "spm.model").exists():
-        return "morph_bpe"
-    if (model_path / "model.pkl").exists():
-        return "morfessor"
-    elif (model_path / "spm.model").exists():
-        return "spm_bpe"
-
-    raise ValueError(f"Cannot detect tokenizer type from {model_path}")
-
-
-def load_tokenizer(model_path: Path, tokenizer_type: str | None = None) -> BaseTokenizer:
-    """Load a tokenizer from a saved directory."""
-    if tokenizer_type is None:
-        tokenizer_type = detect_tokenizer_type(model_path)
-
-    logger.info(f"Loading {tokenizer_type} tokenizer from {model_path}")
-
-    if tokenizer_type == "spm_bpe":
-        tokenizer = SPMBPETokenizer()
-    elif tokenizer_type == "spm_unigram":
-        tokenizer = SPMUnigramTokenizer()
-    elif tokenizer_type == "morfessor":
-        tokenizer = MorfessorTokenizer()
-    elif tokenizer_type == "morph_bpe":
-        tokenizer = MorphBPETokenizer()
-    else:
-        raise ValueError(f"Unknown tokenizer type: {tokenizer_type}")
-
-    tokenizer.load(str(model_path))
-    return tokenizer
 
 
 def main() -> None:
@@ -97,12 +41,12 @@ def main() -> None:
         "--corpus",
         type=str,
         required=True,
-        help="Path to held-out evaluation corpus (prefer hsb_dev.txt or hsb_test.txt).",
+        help="Path to held-out evaluation corpus. Prefer the *_dev.txt or *_test.txt split; e.g. data/processed/<lang>/<dataset>_dev.txt.",
     )
     parser.add_argument(
         "--type",
         type=str,
-        choices=["spm_bpe", "spm_unigram", "morfessor", "morph_bpe"],
+        choices=list(TOKENIZER_TYPES),
         help="Override tokenizer type detection.",
     )
 
@@ -118,9 +62,14 @@ def main() -> None:
         logger.error(f"Corpus not found: {corpus_path}")
         sys.exit(1)
 
-    if corpus_path.name == "hsb.txt":
-        sibling_dev = corpus_path.with_name("hsb_dev.txt")
-        sibling_test = corpus_path.with_name("hsb_test.txt")
+    # Warn if evaluating on an unsplit full corpus file (e.g. v3.txt) while the
+    # _dev/_test sibling splits exist — full-corpus metrics overlap training.
+    stem = corpus_path.stem
+    if not (
+        stem.endswith("_train") or stem.endswith("_dev") or stem.endswith("_test")
+    ):
+        sibling_dev = corpus_path.with_name(f"{stem}_dev.txt")
+        sibling_test = corpus_path.with_name(f"{stem}_test.txt")
         if sibling_dev.exists() and sibling_test.exists():
             logger.warning(
                 "Using the full corpus for evaluation. Prefer %s or %s for held-out metrics.",

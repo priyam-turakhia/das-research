@@ -168,7 +168,7 @@ Given the redundancy, the experiment chosen was Leipzig + Wiki + Witaj — drops
 To support this without breaking v3, `scripts/download_data.py` was extended with two flags:
 
 - `--sources leipzig wiki witaj` — selects which sources to combine. Defaults to `leipzig wmt22` (preserves prior behavior).
-- `--output-suffix lww` — appends a suffix to all output filenames. Empty suffix (default) produces `hsb.txt`; `lww` produces `hsb_lww.txt`, `hsb_lww_train.txt`, etc.
+- `--output-suffix lww` — sets the dataset tag for all output filenames. Default `v3` produces `hsb_v3.txt`, `hsb_v3_train.txt`, etc.; `lww` produces `hsb_lww.txt`, `hsb_lww_train.txt`, etc.
 
 A new `extract_plain` helper handles plain-text sources (Wiki and Witaj), and a `load_source(name)` dispatch function picks the right extractor per source. v3 artifacts are untouched.
 
@@ -223,3 +223,220 @@ Headline: fertility 1.491 (between BPE's 1.363 and Morfessor's 1.636 as expected
 | HF compat | 0/100 | 100/100 | 100/100 |
 
 The biggest single jump came from the Morfessor configuration fix in v2 (OOV went from 20% to 0.3%). The v3 data-quality pass moved every metric in the right direction across all three tokenizers and removed the Morfessor reporting artifact.
+
+---
+
+## Internal refactor — tokenizer registry, shared config schema, HF wrapper deduplication
+
+After MorphBPE landed, a cleanup pass made it cheaper to add a fifth tokenizer in the future. None of the evaluation numbers changed — verified by re-running the lww 4-way evaluation and getting bit-for-bit identical fertility, OOV, vocab coverage, round-trip, and HF-compat scores to the prior 2026-05-19 run.
+
+### Tokenizer registry
+
+`tokenization/registry.py` is now the single source of truth for the name → class mapping, the saved-config schema, type detection from a saved directory, and the load entry point. Previously this logic was duplicated in `scripts/train.py` and `scripts/evaluate.py` and would drift if a new tokenizer were added. Adding a fifth tokenizer now means writing the class, declaring its `tokenizer_type` attribute, and adding it to `get_tokenizer_classes()` — the CLI scripts pick it up without changes.
+
+### `tokenizer_config.json` schema
+
+Standardized on `{tokenizer_type, vocab_size, version: 1}` written by every tokenizer's `save()`. Tokenizer-specific HuggingFace integration keys (like Morfessor's `auto_map`) pass through as extras. The legacy v2/v3 saves used different combinations of `tokenizer_class` and `model_type`; `detect_tokenizer_type` keeps a legacy fallback so existing model directories under `models/` continue to load unchanged.
+
+### SentencePiece training helper
+
+The `SentencePieceTrainer.train(...)` call with its dozen parameters lived identically in `spm_base.py` and `morph_bpe.py`. Extracted into a `train_spm_model(corpus_path, vocab_size, model_type) -> bytes` helper in `spm_base.py`. Both call sites now share one configuration surface.
+
+### HuggingFace wrapper deduplication
+
+`tokenization/hf_base.py` adds two small bases:
+- `BaseHFTokenizer` carries `model_input_names` and `apply_default_special_tokens(kwargs)` (formerly six `setdefault` calls duplicated in every wrapper).
+- `SpmBackedHFTokenizer` carries the `sp_model`-keyed `vocab_size`, `get_vocab`, `_convert_token_to_id`, `_convert_id_to_token`, and `convert_tokens_to_string` methods that were identical between `SentencePieceHFTokenizer` and `MorphBPEHFTokenizer`.
+
+`MorfessorHFTokenizer` inherits from `BaseHFTokenizer` only (different vocab structure — a Python dict, not an SPM model).
+
+### Artifact rename: `cleaned` → `v2`
+
+The two SPM tokenizers trained at the end of v2 had been named `hsb_spm_bpe_cleaned` and `hsb_spm_unigram_cleaned` because they were the first SPM models trained on the v2 cleaned corpus. The `cleaned` tag was ambiguous (it described data, not pipeline version) and visually mixed with the proper dataset tags. Renamed to `hsb_spm_bpe_v2` and `hsb_spm_unigram_v2` to align with `hsb_morfessor_v2`. The eval log at `results/eval_dev_v2.txt` references the old paths in its captured log lines but the numbers stand.
+
+### Default data filenames now carry a dataset tag
+
+The processed-corpus files for v3 were previously `hsb.txt`, `hsb_train.txt`, `hsb_dev.txt`, `hsb_test.txt` — the dataset tag was implicit. Renamed to `hsb_v3.txt`, `hsb_v3_train.txt`, etc. so every file's identity is visible at a glance. The download script's `--output-suffix` default changed from `""` to `v3` to match. `data/` is gitignored so this is local-only state; rerun `scripts/download_data.py` to regenerate from sources.
+
+### Naming convention now documented
+
+The artifact naming scheme — dataset tags, method names, splits — is enumerated in [PROJECT.md §2](PROJECT.md). The intent: adding a new tokenizer method or a new dataset version follows the pattern with no special-casing.
+
+---
+
+## Multi-language module structure — Lower Sorbian (`dsb`) added
+
+The project originally targeted Upper Sorbian (`hsb`) only. Adding Lower Sorbian motivated rearranging the repository so each language is a separate **module** that shares the same pipeline code, the same tokenization library, and the same training/evaluation scripts. None of the algorithm code changed — only the layout and the data-loading layer.
+
+### Per-language directory layout
+
+Everything language-specific now lives under a language-coded subdirectory:
+
+- `data/raw/<lang>/`, `data/processed/<lang>/`
+- `models/<lang>/`
+- `results/<lang>/`
+
+The redundant `hsb_` prefix that used to appear on every artifact (e.g. `hsb_spm_bpe_v3`, `hsb_v3_train.txt`) was stripped — the parent directory already conveys the language. So `models/hsb_spm_bpe_v3` is now `models/hsb/spm_bpe_v3`, and `data/processed/hsb_v3_train.txt` is now `data/processed/hsb/v3_train.txt`. All 10 existing hsb tokenizers were moved without retraining and still load and evaluate identically; the SPM and Morfessor pickles inside don't care about the directory path.
+
+### `download_data.py` is now language-agnostic
+
+The script gained a `--lang` flag and a `LANG_REGISTRY` at the top of the file. The registry maps each language code to its source list (filename, optional download URL, extractor), the GlotLID label to keep during language filtering, and a default source combination. Picking a language switches all three. Pipeline functions (`normalize_and_clean`, `filter_language`, `filter_terminal_punct`, `filter_length`, `apply_moses`, `deduplicate`, `split_sentences`) are unchanged — they were already language-agnostic. Output goes to `data/processed/<lang>/<dataset>.txt` and its splits.
+
+### `train.py` and `evaluate.py` are unchanged in behavior
+
+The CLI scripts already operated on `BaseTokenizer` interfaces, so they didn't need language awareness. The held-out-corpus warning was generalized to look for sibling `_train`/`_dev`/`_test` files for any stem, not just files starting with `hsb_`.
+
+### dsb sources and `v1` dataset
+
+Two sources are wired in for Lower Sorbian:
+
+- **Witaj** (`witaj_dsb_monolingual.txt`, ~120k sentences) — manually placed under `data/raw/dsb/`.
+- **MT train + dev** (`train.de-dsb.dsb` and `dev.de-dsb.dsb`, ~172k + ~4k sentences) — auto-downloaded from the TUM-NLP `llms-limited-resources2025` GitHub repo. These are the dsb side of a de↔dsb MT training set; pooled with Witaj and re-split, not treated as a separate held-out set.
+
+The Leipzig portal lists a `dsb_wikipedia_2021` corpus but it is not downloadable (browseable only); the only Lower Sorbian Wikipedia archive on the Leipzig download endpoint is the 2016 10K snapshot, which was tried briefly and then discarded in favor of the MT data above.
+
+Running `scripts/download_data.py --lang dsb --output-suffix v1` produced the first dsb dataset, tagged `v1`:
+
+| Step | Lines |
+|---|---|
+| Raw total (Witaj + MT train + MT dev) | 296,460 |
+| After GlotLID @ 0.5 (`__label__dsb_Latn`) | 277,378 (–19,082) |
+| After terminal-punct filter | 247,579 (–29,799) |
+| After length filter (3–100 words) | 247,045 (–534) |
+| After Moses + dedup | **239,316** |
+
+Splits: 215,384 train / 11,965 dev / 11,967 test. Total tokens: 3,770,578.
+
+For scale comparison: hsb v3 is 703,595 sentences, hsb lww is 1,289,047. dsb v1 sits at roughly one-third of hsb v3 by sentences (and tokens). The two source corpora available for Lower Sorbian don't get us to hsb scale; this is accepted as a corpus-availability constraint, not a pipeline issue. Tokenizer comparisons within dsb are unaffected; cross-language comparisons should note the size asymmetry.
+
+### Source-overlap check (dsb)
+
+Exact-line intersection between Witaj and MT train: **0 lines**. The two sources are independent — unlike on the hsb side, where Witaj subsumes ~93% of WMT22.
+
+### Tokenizer training and 4-way evaluation (dsb)
+
+All four tokenizers were trained on `data/processed/dsb/v1_train.txt` (215,384 sentences) at the same 16,000 vocab budget and evaluated on `v1_dev.txt` (11,965 sentences). Output: [results/dsb/eval_dev_v1_4way.txt](../results/dsb/eval_dev_v1_4way.txt). Headline: fertility 1.289 / 1.514 / 1.571 / 1.491 (BPE / Unigram / Morfessor / MorphBPE), OOV 0.00% for BPE and MorphBPE, 0.88% for Morfessor (character fallback rises on the smaller corpus), round-trip 1000/1000 and HF compatibility 100/100 for all four. The four-tokenizer ordering (BPE shortest, Morfessor lowest fertility std and most morphologically interpretable, MorphBPE between) matches the hsb runs — useful evidence that the per-algorithm conclusions generalize across the two Sorbian variants. Full table and interpretation: [EVALUATIONS.md §8](EVALUATIONS.md).
+
+---
+
+## Semi-supervised Morfessor for dsb — Apertium metadix annotations
+
+The dsb Morfessor baseline has noticeably higher OOV (0.88%) and lower vocab coverage (70.9%) than the hsb runs, both driven by the smaller training corpus. The supervisor pointed out that Lower Sorbian has an Apertium morphological dictionary (`apertium-dsb.dsb.metadix` at the repo root) usable as a small gold-segmentation source. The plan: extract word-level `surface\tstem ending` annotations from the metadix, feed them to Morfessor 2.0's semi-supervised training (`model.set_annotations`), and check whether grounded morphology guidance lifts the dsb Morfessor tokenizer.
+
+### Annotation extraction
+
+`scripts/extract_dsb_morph_annotations.py` walks the metadix XML, recursively expands paradigm definitions, and emits `surface\tstem ending` rows for every surface form (skipping `r="LR"` analysis-only entries). Outputs two TSVs under `data/processed/dsb/`:
+
+- `metadix_morph_annotations_full.tsv` — 31,601 rows (every distinct surface form).
+- `metadix_morph_annotations_1000.tsv` — 1,000 rows, paradigm-balanced (sqrt-weighted quotas per paradigm so small closed-class paradigms keep representation), seed 42.
+
+980 of the 1,000 rows are two-part `stem ending`; the remaining 20 are one-part rows for closed-class words where the lemma equals the surface form. The script ends with a Morfessor smoke test (`set_annotations` + one-epoch `train_batch`) so format breakage is caught at extraction time.
+
+### `SemiSupervisedMorfessorTokenizer`
+
+A thin subclass of `MorfessorTokenizer` in `tokenization/morfessor_semi.py` (`tokenizer_type = "morfessor_semi"`). `MorfessorTokenizer.train()` was extended with a keyword-only `annotations_path` argument that, when set, calls `model.set_annotations(annotations)` after `load_data()` and before `train_batch()`. Registry, `__init__.py`, and `detect_tokenizer_type` were extended for the new type. The change is backward-compatible — the existing `MorfessorTokenizer` and `MorphBPETokenizer` callers are untouched.
+
+The first attempt simply added `set_annotations` on top of the unchanged baseline configuration (`NumMorphCorpusWeight`, "ones" count dampening, hyphen forcesplit). Numbers barely moved: fertility 1.571 → 1.591, vocab coverage 70.9% → 70.4%, OOV unchanged at 0.88%. Eight of ten sample segmentations were identical to the baseline. Plumbing was correct, but the supervision was being neutralized.
+
+The cause was two adaptive weight updaters running simultaneously inside `train_batch` and pulling against each other:
+
+1. **`NumMorphCorpusWeight`** auto-tunes the main `corpusweight` toward a target morpheme-type count (~15,750 on this corpus).
+2. **`set_annotations(..., annotatedcorpusweight=None)`** auto-tunes a second weight to enforce the annotations.
+
+Compounding this, the apertium annotations are by construction two-piece `stem | ending`, while Morfessor's natural dsb output averages 3–5 pieces. The annotation signal pulled toward fewer, longer pieces; the budget tuner pulled toward enough pieces to fill the budget.
+
+### Fix: fixed corpus weight, annotation tuner adapts alone
+
+The semi-supervised subclass now passes `use_num_morph_weight=False` to the parent's `train()`. The parent constructs `BaselineModel(forcesplit_list=["-"])` with Morfessor's default `corpusweight=1.0` instead of wiring `NumMorphCorpusWeight`, so only the `set_annotations` tuner adapts during training. The 16k vocabulary budget is enforced by the existing post-hoc top-N morpheme cap, which previously sat as a safety net behind the NumMorph tuner. (`MorfessorTokenizer.train()` gained a `use_num_morph_weight: bool = True` kwarg so the baseline behavior is unchanged for everything else.)
+
+### Results
+
+Trained on `data/processed/dsb/v1_train.txt` with a 500-row paradigm-balanced annotation set (the choice of 500 is from the sweep documented below), evaluated on `v1_dev.txt` alongside the baseline `morfessor_v1`. Output: [results/dsb/eval_dev_v1_morfessor_semi.txt](../results/dsb/eval_dev_v1_morfessor_semi.txt).
+
+| Metric | `morfessor_v1` | `morfessor_semi_v1` |
+|---|---|---|
+| Fertility (mean) | 1.571 | **1.548** |
+| Fertility (std)  | **0.166** | 0.270 |
+| Vocab size | 15,762 | 15,866 |
+| Unique tokens used | 11,184 | **12,769** |
+| Vocab coverage | 70.9% | **80.5%** |
+| OOV rate | 0.88% | **0.72%** |
+| Round-trip / HF | 1000/1000, 100/100 | 1000/1000, 100/100 |
+
+Four of five non-tied metrics improved, three meaningfully:
+
+- **Vocab coverage jumped 9.6 pp.** The annotations pushed Morfessor toward morphemes that actually appear in real text — substantially more of the learned vocabulary is exercised by the dev set.
+- **OOV dropped ~18% relative** (0.88% → 0.72%). Fewer character fallbacks, matching the coverage gain.
+- **Fertility (mean) is slightly shorter.** Dropping NumMorph did not blow up the budget — the post-hoc cap held.
+- **Fertility (std) widened** (0.166 → 0.270). The one tradeoff: with fewer character fallbacks the length distribution is more bimodal (common dsb words stay short, rare/foreign words still fragment).
+- **Round-trip and HF compatibility tied at perfect.**
+
+The side-by-side table in the eval output shows more visible fragmentation than the baseline on the 10 hsb sample words used by the evaluator. This is the dsb tokenizer being asked to handle out-of-domain hsb morphology; it does not reflect dsb dev-set behavior, which is captured by the numbers above.
+
+### Remaining follow-ups
+
+- **Record the annotations path in the saved `tokenizer_config.json`.** Currently `save()` does not capture it, so a future reader cannot tell which annotation file produced the model. One-line addition to the `write_config(...)` `**extras`.
+- **Allow richer (deeper-than-two-piece) annotations** if a source becomes available. Apertium can only give `stem ending`; a source that exposes inner morpheme structure could improve the result further.
+
+### Tuning sweep — sample size, sampling strategy, annotation weight
+
+Swept 13 configurations to test whether the canonical `morfessor_semi_v1` setup is near-optimal: sample sizes {100, 500, 5000, 10000, 20000} crossed with two sampling strategies (paradigm-balanced, corpus-frequency-weighted), plus a weight sweep {auto-tune, 1, 10, 100} at the best-performing sample size. Morfessor settings, training corpus, and dev split unchanged. All trial artifacts (models, generated TSVs, logs) lived in `/tmp/dsb_semi_sweep/` and were cleaned up afterwards — no new files in the project.
+
+Pre-flight finding: of apertium's 31,601 surface forms, only **3,663 appear in `v1_train`** (~12% overlap). The frequency-weighted strategy capped at 3,663; larger requested sizes were skipped.
+
+Result: only `balanced_500` met all three primary constraints relative to the 1,000-row variant the sweep was run against (coverage ≥ 80.3%, OOV ≤ 0.71%, fertility mean ≤ 1.550), landing at fertility 1.542 / std 0.269 / coverage 80.6% / OOV 0.70%. Deltas vs the 1,000-row variant are within ~0.5% on fertility and within the noise on OOV and coverage; fertility std is a hair worse.
+
+Observations:
+
+1. OOV across the 13 configurations is bimodal — values landed near 0.70% or near 1.30–1.50%, with nothing in between. Only `balanced_500`, `freq_500`, and the 1,000-row variant reached the lower band.
+2. Balanced sample sizes 5000 / 10000 / 20000 all landed at OOV ≈ 1.5% despite coverage holding at ~81%.
+3. Every explicit `annotatedcorpusweight` tested (1, 10, 100) at `balanced_500` landed at OOV 1.31–1.36%, vs 0.70% with the auto-tuned default.
+4. Corpus-frequency-weighted sampling did not beat paradigm-balanced at any tested size.
+
+**Decision: `balanced_500` was promoted as the canonical `morfessor_semi_v1`.** The numerical deltas vs the 1,000-row variant are within noise on every primary metric (the canonical retrain landed at 1.548 / 0.270 / 80.5% / 0.72%), so the choice was not driven by absolute improvement; the smaller annotation set is easier to defend as a default, sits within the range of annotation counts used in published low-resource Morfessor work, and trains slightly faster. `DEFAULT_ANNOTATIONS_PATH` in `tokenization/morfessor_semi.py` now points at `data/processed/dsb/metadix_morph_annotations_500.tsv`; the 1,000-row TSV was removed.
+
+---
+
+## MLM pretraining pipeline (`scripts/pretrain.py`)
+
+Added a script to pretrain an XLM-RoBERTa-base-shaped encoder from random init on any of the trained tokenizers' output. Motivation: the encoder is intended to become the **student** in a cross-lingual embedding distillation step against stock `FacebookAI/xlm-roberta-base` (the multilingual teacher); MLM here is a sensible init, not the final training step. The parallel data for the distillation step is not yet loaded.
+
+### Design choices
+
+- **From scratch, not continued pretraining.** Our 16k vocabulary is entirely different from stock XLM-R's 250k SPM, so the embedding matrix can't be reused — there is no win to loading the rest of the pretrained weights either, since the encoder's input distribution would be wildly mismatched.
+- **`XLMRobertaForMaskedLM(XLMRobertaConfig(...))`.** Production preset is the standard BERT-base shape (12 layers, hidden 768, 12 heads, FFN 3072), matching the teacher exactly so the student output space is comparable at distillation time without a projection layer. Smoke preset (`--smoke`) is 2 layers / hidden 128 for laptop validation.
+- **`max_position_embeddings=514` by default.** Decoupled from training `seq_len`. An earlier draft tied them together (`seq_len + 2`) which would have capped the architectural input length to whatever flag the user trained with; reverted because the saving is ~0.2 MB out of 110 MB and the downside is real.
+- **MLM only**, RoBERTa-style: `DataCollatorForLanguageModeling(mlm=True, mlm_probability=0.15)`. No NSP.
+
+### Tokenizer wrapper fix: `[CLS] … [SEP]`
+
+Discovered during this work: `BaseHFTokenizer` in `tokenization/hf_base.py` did not override `build_inputs_with_special_tokens`, `get_special_tokens_mask`, or `create_token_type_ids_from_sequences`. Default `PreTrainedTokenizer` behavior is no-op, so calling `tokenizer("…")` returned raw content IDs with no `[CLS]` / `[SEP]` wrapping. Two consequences:
+
+- The data collator's `get_special_tokens_mask` returned an empty mask, which means it might have masked `[CLS]` and `[SEP]` had they been there (they weren't).
+- Downstream code that reads a `[CLS]` sentence embedding would have gotten garbage (the position is never seen in training).
+- The student's input format diverges from the teacher's at distillation time — a problem we caught now rather than later.
+
+Fix: added the three overrides to `BaseHFTokenizer`. All five wrappers inherit, so one change covers everything. Verified on all 5 tokenizers: native `encode()` still matches HF `encode(add_special_tokens=False)` — so the existing `hf_compatibility_test` is unaffected. HF `encode(add_special_tokens=True)` now produces `[CLS] + content + [SEP]`. Special-token mask correctly returns 1 at both endpoints and 0 elsewhere.
+
+### Eval metrics
+
+`compute_metrics` reports `eval_loss`, `perplexity`, top-1 / top-5 accuracy at masked positions, and **bits per character (BPC)**. BPC normalizes the masked-position NLL by the source-text character count, making it **invariant to tokenization granularity** — the right metric for comparing the 5 tokenizers head-to-head, since perplexity by itself depends on each tokenizer's fertility. Implementation detail: `preprocess_logits_for_metrics` reduces each batch from `(B, L, V)` logits to top-5 indices + per-token NLL *before* Trainer accumulates across the eval set. Without that step the full-logits accumulator OOMs even at modest dev-set sizes — would have crashed any device, not just MPS. Standard pattern documented in HuggingFace's own `run_mlm.py`.
+
+### Checkpoints
+
+Standard HF behavior: every `--save-steps` steps, a `checkpoint-<N>/` directory is written containing model + optimizer/scheduler state + tokenizer files + RNG state. `--save-total-limit K` keeps only the K most recent; older auto-deleted. `--resume-from-checkpoint PATH` restores everything including the dataset cursor for true mid-epoch resume. `--load-best-model-at-end` saves the lowest-`eval_loss` checkpoint as the final model.
+
+One nuance: `AutoTokenizer.from_pretrained(checkpoint_path)` does **not** work because our custom tokenizer classes aren't in HF's auto-discovery registry. Workaround: reload the tokenizer separately via `tokenization/registry.py:load_tokenizer(...).to_hf_tokenizer()`. The model itself reloads fine through `AutoModelForMaskedLM`. Inconvenience, not corruption — flagged in [PROJECT.md §7](PROJECT.md).
+
+### Verification on M1
+
+The full XLM-R-base architecture (~110 M params) was test-run on a 16 GB M1 Pro at `seq_len=256, batch_size=1, fp32, MPS`, 3 steps + a full-dev eval. Pipeline ran end-to-end. All metrics finite and consistent with random init (perplexity ≈ vocab size, top-1 ≈ 0.06%, BPC ≈ 3.1). One nit: `eval_loss` came back NaN while the independently-computed perplexity was finite — almost certainly an MPS-specific numerical hiccup at batch 1 with no batch averaging, not a real bug. Expected not to recur on CUDA with bf16 and batch 64.
+
+### New dependencies
+
+`torch>=2.2.0`, `datasets>=2.16.0`, `accelerate>=1.13.0` added to `pyproject.toml`. The first two were declared up-front; `accelerate` was added when Trainer demanded it (transformers 5.x requires `accelerate>=1.1.0` even on single-device runs).
+
+### Remaining follow-ups
+
+- Run the GPU training across all 5 tokenizers, report BPC and top-k accuracy in EVALUATIONS.md.
+- Load the parallel data and implement the cross-lingual embedding distillation step.

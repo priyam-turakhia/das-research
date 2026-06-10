@@ -12,3 +12,9 @@ wheels/
 # Data
 
 data/
+
+# Trained tokenizer binaries (large, regenerable)
+models/
+
+# Local tool config
+.claude/
