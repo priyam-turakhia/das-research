@@ -256,33 +256,34 @@ class MorfessorTokenizer(BaseTokenizer):
         for i, tok in enumerate(SPECIAL_TOKENS):
             self.vocab[tok] = i
 
-        # 2. Add character inventory (IDs 5 to 5+len(chars)-1).
-        # Characters are guaranteed slots so the fallback path can never
-        # produce [UNK] for a previously-seen character.
-        char_start_id = len(SPECIAL_TOKENS)
+        # 2. Add character inventory using a running counter so IDs stay dense
+        # even when a char duplicates a special token. Characters are guaranteed
+        # slots so the fallback path can never produce [UNK] for a previously-seen
+        # character.
         sorted_chars = sorted(char_inventory)
-        for i, char in enumerate(sorted_chars):
+        next_id = len(SPECIAL_TOKENS)
+        for char in sorted_chars:
             if char not in self.vocab:  # Avoid duplicates
-                self.vocab[char] = char_start_id + i
+                self.vocab[char] = next_id
+                next_id += 1
 
-        # 3. Add morphemes. NumMorphCorpusWeight already targeted ~target_morphs
-        # during training, so this top-N cut rarely evicts anything — it's a
-        # safety net in case the model overshoots the budget.
-        morpheme_start_id = char_start_id + len(sorted_chars)
-        morpheme_slots = vocab_size - morpheme_start_id
-
-        if morpheme_slots <= 0:
+        # 3. Add morphemes. Same running-counter pattern: when a candidate
+        # morpheme duplicates an existing char (e.g. single-char morphemes like
+        # "o", "a", "n"), it's skipped without leaving an ID gap. Gaps here
+        # would make max(vocab.values()) > len(vocab) - 1, breaking the model
+        # embedding lookup at runtime.
+        if next_id >= vocab_size:
             logger.warning(
                 f"  No slots for morphemes! Chars ({len(sorted_chars)}) + "
                 f"special ({len(SPECIAL_TOKENS)}) >= vocab_size ({vocab_size})"
             )
-            morpheme_slots = 0
 
-        # Get top morphemes by frequency
-        top_morphemes = morpheme_counts.most_common(morpheme_slots)
-        for i, (morpheme, _) in enumerate(top_morphemes):
-            if morpheme not in self.vocab:  # Avoid char/morpheme overlap
-                self.vocab[morpheme] = morpheme_start_id + i
+        for morpheme, _ in morpheme_counts.most_common():
+            if next_id >= vocab_size:
+                break
+            if morpheme not in self.vocab:
+                self.vocab[morpheme] = next_id
+                next_id += 1
 
         # Build reverse mapping
         self.ids_to_tokens = {v: k for k, v in self.vocab.items()}
