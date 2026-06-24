@@ -72,7 +72,11 @@ class SentenceDistiller(nn.Module):
         mask = attention_mask.unsqueeze(-1).to(out.last_hidden_state.dtype)
         summed = (out.last_hidden_state * mask).sum(dim=1)
         counts = mask.sum(dim=1).clamp(min=1e-9)
-        emb = summed / counts
+        # L2-normalize: the LaBSE targets are unit-norm, so MSE on normalized
+        # vectors == 2 - 2*cos, i.e. directly the retrieval objective. Without
+        # this, MSE collapses to predicting the target centroid — low MSE (~1/dim),
+        # chance retrieval — and never recovers.
+        emb = F.normalize(summed / counts, p=2, dim=-1)
         if labels is not None:
             loss = F.mse_loss(emb, labels.to(emb.dtype))
             return {"loss": loss, "logits": emb}

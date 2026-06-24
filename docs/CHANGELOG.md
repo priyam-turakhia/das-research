@@ -509,6 +509,10 @@ Reimers & Gurevych (2020) MSE distillation, cross-lingual term only: `MSE(studen
 
 Validated end-to-end with `--smoke` on the M1 (LaBSE loads + embeds, MSE drops 0.32 → 0.12 over 20 steps, retrieval eval + baseline run, encoder + `sentence_encoder.json` saved and reloads via `AutoModel`). New dependency: `sentence-transformers`.
 
+### Fix: normalize the student embedding before MSE (mean-collapse)
+
+The first GPU distillation run collapsed: `eval_mse` crashed to ≈ 1/768 (the floor for predicting the target centroid) within a fraction of an epoch while retrieval P@1 stayed pinned at chance and grad-norm went to ~0. Cause: MSE onto **unit-norm** LaBSE targets with an **un-normalized** student is minimized by outputting one constant vector (the mean embedding) — low MSE, zero per-sentence discrimination. Fix: L2-normalize the pooled student embedding before the MSE, so `MSE(ŝ, t) = 2 − 2·cos(ŝ, t)` is exactly the retrieval objective and the centroid solution is no longer reachable (output is forced to unit norm). One-line change in `SentenceDistiller.forward`; also makes train consistent with the eval/inference path, which already normalizes. The cached teacher embeddings are unaffected, so the rerun skips the LaBSE precompute.
+
 ### Remaining follow-ups
 
 - GPU distillation run for the morfessor encoder; report MSE + retrieval P@1 and the data-size sweep in EVALUATIONS.md.

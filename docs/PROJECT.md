@@ -498,7 +498,7 @@ Minimize `MSE(student(polish), LaBSE(german))` over de–pl parallel pairs. The 
 
 ### Student
 
-`AutoModel.from_pretrained(--encoder)` loads the encoder body of a pretrained model (the MLM head is dropped; an unused pooler is newly initialized and ignored). The sentence embedding is **mean pooling** over the last hidden states weighted by the attention mask (Reimers & Gurevych 2019 — mean beats CLS, and our MLM-only model has no trained CLS sentence representation). Student hidden size 768 equals LaBSE's output dimension, so there is no projection layer. The student is not L2-normalized during training; MSE pulls it onto the unit-norm teacher targets directly. `--freeze-layers N` freezes the embeddings and bottom N encoder layers to retain MLM-init features.
+`AutoModel.from_pretrained(--encoder)` loads the encoder body of a pretrained model (the MLM head is dropped; an unused pooler is newly initialized and ignored). The sentence embedding is **mean pooling** over the last hidden states weighted by the attention mask (Reimers & Gurevych 2019 — mean beats CLS, and our MLM-only model has no trained CLS sentence representation). Student hidden size 768 equals LaBSE's output dimension, so there is no projection layer. The pooled student embedding is **L2-normalized before the MSE** — since the LaBSE targets are unit-norm, `MSE(ŝ, t) = 2 − 2·cos(ŝ, t)`, so the loss is exactly the retrieval objective. Without this normalization the loss collapses to predicting the target centroid (MSE ≈ 1/dim, chance retrieval); see [CHANGELOG.md](CHANGELOG.md). `--freeze-layers N` freezes the embeddings and bottom N encoder layers to retain MLM-init features.
 
 ### Teacher and caching
 
