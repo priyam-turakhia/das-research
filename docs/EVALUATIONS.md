@@ -348,12 +348,59 @@ The side-by-side table in the raw eval output shows visibly more fragmentation t
 
 ---
 
-## 9. What's missing — and what would close the gap
+## 9. dsb MLM pretraining (v1) — closing the proxy-metric gap
 
-Everything in this document is a sanity check. None of these metrics tell you which tokenizer makes a better downstream model. The closing experiment, when someone wants to do it, is:
+The experiment §10 of earlier versions used to flag as missing has now been run on dsb v1. For each of the 5 trained tokenizers, an XLM-RoBERTa-base-shaped encoder (12 layers, 768 hidden, 12 heads, FFN 3072, ~98 M params after vocab embedding) was trained from random init on `data/processed/dsb/v1_train.txt` (215,384 sentences) for 10 epochs with `--batch-size 64 --grad-accumulation-steps 4 --learning-rate 5e-4 --warmup-ratio 0.06 --weight-decay 0.01 --bf16`. Eval every 500 steps on `v1_dev.txt`. Same training protocol for every tokenizer — tokenization is the only variable. Each run was ~21 min on a single H100. Script: `scripts/pretrain.py`. Metric definitions in [METRICS.md §7](METRICS.md).
 
-1. Train a small Transformer language model on each tokenization (same architecture, same training budget, same hyperparameters — so the tokenizer is the only variable).
-2. Evaluate held-out perplexity on `data/processed/<lang>/<dataset>_test.txt`.
-3. Compare.
+### Final eval results (best checkpoint by `eval_loss`)
 
-A tokenizer with slightly worse fertility might still produce a better model if its tokens are more learnable. The proxy metrics here can't tell you that.
+| Tokenizer | eval_loss | perplexity | top-1 | top-5 | BPC |
+|---|---|---|---|---|---|
+| spm_bpe | 3.33 | 28.0 | 41.5 % | 58.2 % | 1.073 |
+| spm_unigram (epoch 8.3 snapshot) | 2.75 | 15.7 | 50.7 % | 66.1 % | 1.058 |
+| morph_bpe | 2.58 | 13.3 | 52.8 % | 69.5 % | 0.986 |
+| morfessor_semi | 2.53 | 12.6 | 52.6 % | 70.3 % | 0.993 |
+| **morfessor** | **2.32** | **10.3** | **56.1 %** | **73.2 %** | **0.920** |
+
+The Unigram row is the latest snapshot the conversation log retained — the run completed to 10 epochs but only the mid-run number is preserved. The final BPC is within ~0.02 of the snapshot based on trajectory.
+
+### Reading the numbers
+
+**BPC is the column to read for the cross-tokenizer ranking.** Token-space metrics (loss, perplexity, top-k) are inflated for tokenizations that produce fewer, coarser pieces — Unigram and Morfessor look disproportionately good in those columns partly because their per-token prediction problem is easier than BPE's. BPC normalizes that out by dividing by source-text character count.
+
+- **Morfessor wins by 0.15 bits/character over BPE** — a large gap. In compression terms, the Morfessor model encodes the dev set about 14 % more efficiently. Cleanly attributable to the tokenization, since training was identical.
+- **MorphBPE and morfessor_semi are roughly tied at second place**, both clearly behind plain Morfessor. The BPE-on-morphemes merging step undoes some of the morpheme-boundary signal Morfessor provides; the supervised annotations push segmentation toward finer pieces than the unsupervised MDL optimum, making the LM job harder.
+- **Unigram beats BPE by 0.015 BPC**. Known result in the tokenizer literature for morphologically rich, small-vocab settings (Kudo 2018) — Unigram's probabilistic segmentation handles morphological variation more gracefully than BPE's greedy merges.
+- **BPE last**. Frequency-driven merges shred morpheme boundaries; the LM has to relearn what the tokenizer destroyed.
+
+### Headline finding
+
+For Lower Sorbian at a 16,000-token vocabulary budget on this corpus, **unsupervised Morfessor segmentation produces the best LM**. Hybridizing with BPE (MorphBPE) and adding annotation supervision (morfessor_semi) both make things worse. This is a clean inversion of the assumption that more sophisticated pipelines should win.
+
+### What this does not establish
+
+- **Generalization to hsb.** Same experiment hasn't been run on hsb yet. The intrinsic-metric ordering is preserved across hsb v3, hsb lww, and dsb v1 — but intrinsic ordering and MLM ordering are not the same question.
+- **Generalization to downstream tasks.** A better MLM init is necessary, not sufficient, for downstream performance. The encoder is intended to become the student in cross-lingual embedding distillation against stock `xlm-roberta-base`; that step will test whether the BPC advantage propagates into the distilled space.
+- **Annotation supervision in general.** morfessor_semi underperforming here is specific to (a) the 500-row paradigm-balanced metadix sample and (b) the unsupervised MDL optimum being already strong on this corpus. A richer-than-two-piece annotation source could change the answer.
+
+Raw training logs (per-step train loss, eval at every 500 steps, BPC trajectory) live in each model's `models/dsb/xlmr_<tokenizer>_v1/runs/` directory as TensorBoard event files.
+
+---
+
+## 10. Cross-lingual embedding distillation — setup (results pending)
+
+The downstream evaluation the encoders were built for is now wired up (`scripts/distill.py`); the GPU run and its numbers are pending, so this records the protocol.
+
+**Task.** Distill a pretrained encoder into a sentence encoder that maps Slavic input into LaBSE's space, by minimizing `MSE(student(polish), LaBSE(german))` on de–pl Europarl. Polish stands in for Lower Sorbian (LaBSE covers neither dsb nor is there enough dsb parallel data yet; Lower Sorbian is the closest high-resource West-Slavic relative). Teacher = `sentence-transformers/LaBSE` (768-dim, frozen, embeddings cached).
+
+**Data.** `data/processed/de-pl/{train,dev,test}.{de,pl}` = 476,569 / 26,476 / 26,477 pairs from Europarl, cleaned pair-wise (either-side dedup, GlotLID deu/pol, terminal-punct, length 3–80 + ratio ≤3). See [CHANGELOG.md](CHANGELOG.md).
+
+**Metrics** (definitions in [METRICS.md §8](METRICS.md)): MSE to teacher, and bitext retrieval **P@1** both directions over a held-out ~1000-pair pool. Selection metric is `p1_pl2de` (Polish→German), matching the eventual dsb→de direction. A baseline eval of the un-distilled student (≈ chance retrieval) is logged before training to show the lift.
+
+**Anti-collapse protocol.** The risk is the student memorizing Europarl into a LaBSE-clone that doesn't transfer to dsb and washes out tokenizer differences. Guards: select on retrieval (not loss); an optional out-of-domain probe (`--ood-eval`, Tatoeba de–pl) with the in-domain-vs-OOD gap as the diagnostic; and a data-size sweep (`--max-train-pairs ∈ {100k, 250k, all}`, dev/test fixed) choosing the size that maximizes OOD retrieval.
+
+Expected reporting once the GPU run lands: a baseline-vs-final table of MSE and both-direction P@1 per training size, then the same distillation repeated across the five tokenizers (does the morfessor BPC advantage carry into the distilled space?), and finally the dsb-transfer probe on de–dsb data.
+
+## 11. What's still missing
+
+The same MLM comparison on hsb v3 and hsb lww would establish whether the dsb ordering is corpus-specific or language-general. The distillation results (§10) are pending the GPU run. The genuine end goal — dsb sentence embeddings — needs the de–dsb transfer step (the German side of the MT pairs, not yet on disk) once the Polish-proxy distillation is validated.

@@ -28,7 +28,7 @@ uv run python scripts/evaluate.py \
 
 End-to-end wall-clock time on lww is dominated by Morfessor (~20 min) and MorphBPE (~16 min) training. SPM BPE and Unigram each finish in under a minute.
 
-For Lower Sorbian (`dsb`), substitute `--lang dsb --output-suffix v1` in step 1, `data/processed/dsb/v1_train.txt` and `models/dsb/<method>_v1` in the train/evaluate commands, and `data/processed/dsb/v1_dev.txt` for the eval corpus. See [docs/PROJECT.md §9](docs/PROJECT.md) for the explicit command sequence.
+For Lower Sorbian (`dsb`), substitute `--lang dsb --output-suffix v1` in step 1, `data/processed/dsb/v1_train.txt` and `models/dsb/<method>_v1` in the train/evaluate commands, and `data/processed/dsb/v1_dev.txt` for the eval corpus. See [docs/PROJECT.md §10](docs/PROJECT.md) for the explicit command sequence.
 
 ## MLM pretraining (XLM-R-base)
 
@@ -54,7 +54,34 @@ uv run python scripts/pretrain.py \
     --load-best-model-at-end --report-to tensorboard
 ```
 
-See [docs/PROJECT.md §9](docs/PROJECT.md) for the script's full flag set and the MLM eval metrics (loss, perplexity, top-1/top-5 accuracy at masked positions, bits per character).
+See [docs/PROJECT.md §7](docs/PROJECT.md) for the script's full flag set and the MLM eval metrics (loss, perplexity, top-1/top-5 accuracy at masked positions, bits per character).
+
+First-round results on dsb v1 in [docs/EVALUATIONS.md §9](docs/EVALUATIONS.md): unsupervised Morfessor wins at **BPC 0.92**, ahead of MorphBPE (0.99), semi-supervised Morfessor (0.99), SPM Unigram (≈ 1.06), and BPE (1.07).
+
+## Cross-lingual embedding distillation (LaBSE teacher)
+
+`scripts/distill.py` turns a pretrained encoder into a sentence encoder by distilling against **LaBSE**: it minimizes `MSE(student(polish), LaBSE(german))` on de–pl parallel data, so the student learns to map Slavic input into LaBSE's space. Polish is the measurable stand-in for Lower Sorbian (LaBSE doesn't cover dsb); the eventual dsb step is structurally identical. Same smoke/GPU pattern as pretraining. Parallel data is prepared first with `scripts/prepare_parallel.py` (pair-aware strict cleaning → `data/processed/de-pl/{train,dev,test}.{de,pl}`).
+
+```
+# Prepare the de–pl parallel corpus (pair-aware cleaning + 90/5/5 split)
+uv run python scripts/prepare_parallel.py
+
+# Local smoke (downloads LaBSE ~1.8 GB first run, then runs on MPS/CPU)
+uv run python scripts/distill.py \
+    --encoder models/dsb/xlmr_morfessor_v1 --tokenizer-path models/dsb/morfessor_v1 \
+    --output /tmp/distill_smoke --smoke --batch-size 8 --seq-len 128
+
+# GPU run (standard Reimers & Gurevych / LaBSE hyperparameters)
+uv run python scripts/distill.py \
+    --encoder models/dsb/xlmr_morfessor_v1 --tokenizer-path models/dsb/morfessor_v1 \
+    --data-dir data/processed/de-pl --output models/dsb/labse_distill_morfessor_v1 \
+    --seq-len 256 --batch-size 64 --learning-rate 2e-5 \
+    --warmup-ratio 0.1 --weight-decay 0.01 --num-train-epochs 5 --bf16 \
+    --eval-steps 500 --save-steps 500 --save-total-limit 3 \
+    --load-best-model-at-end --report-to tensorboard
+```
+
+Selection metric is **bitext retrieval P@1** (pl→de) over a held-out pool, not training loss. Add `--ood-eval <prefix>` (e.g. Tatoeba de–pl) to select on out-of-domain retrieval and watch the in-domain-vs-OOD gap — the guard against the student overfitting Europarl into LaBSE. Sweep training size with `--max-train-pairs {100000,250000,0}` (dev/test stay fixed). LaBSE teacher embeddings are precomputed and cached to `.npy`; `--no-cache-teacher` disables the disk cache.
 
 ## Documentation
 

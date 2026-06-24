@@ -38,9 +38,13 @@ das-research/
 │       │   ├── v3_dev.txt         5% split
 │       │   ├── v3_test.txt        5% split
 │       │   └── lww{,_train,_dev,_test}.txt   Leipzig+Wiki+Witaj alternative
-│       └── dsb/
-│           ├── v1{,_train,_dev,_test}.txt    Witaj+MT corpus
-│           └── metadix_morph_annotations_{1000,full}.tsv  Apertium-derived word-level segmentations (semi-supervised Morfessor input)
+│       ├── dsb/
+│       │   ├── v1{,_train,_dev,_test}.txt    Witaj+MT corpus
+│       │   └── metadix_morph_annotations_{1000,full}.tsv  Apertium-derived word-level segmentations (semi-supervised Morfessor input)
+│       └── de-pl/                  Parallel corpus for distillation (NOT monolingual)
+│           ├── {train,dev,test}.de  German side (teacher input), one sentence per line
+│           ├── {train,dev,test}.pl  Polish side (student input), line-aligned to .de
+│           └── {train,dev,test}.de.labse.npy   Cached LaBSE(German) embeddings (fp16)
 ├── apertium-dsb.dsb.metadix       Apertium Lower Sorbian morphological dictionary (raw source for the annotations TSV)
 ├── tokenization/                  Library code (language-agnostic)
 │   ├── __init__.py
@@ -56,10 +60,12 @@ das-research/
 │   ├── morph_bpe.py               Hybrid Morfessor + BPE tokenizer + HF wrapper
 │   └── evaluate.py                Metric functions
 ├── scripts/                       Command-line entry points (language-agnostic)
-│   ├── download_data.py           Downloads, filters, preprocesses one language
+│   ├── download_data.py           Downloads, filters, preprocesses one language (monolingual)
+│   ├── prepare_parallel.py        Pair-aware cleaning + split of a parallel (bitext) corpus
 │   ├── train.py                   Trains one tokenizer
 │   ├── evaluate.py                Evaluates one or more trained tokenizers
 │   ├── pretrain.py                XLM-R-base MLM pretraining using any trained tokenizer
+│   ├── distill.py                 Cross-lingual embedding distillation (LaBSE teacher)
 │   └── extract_dsb_morph_annotations.py   Apertium metadix → semi-supervised annotation TSV
 ├── models/
 │   ├── hsb/                       Upper Sorbian trained tokenizers
@@ -349,6 +355,37 @@ uv run python scripts/pretrain.py \
 
 A `--smoke` flag swaps in a tiny 2-layer / 128-hidden model so the entire pipeline can be validated on a laptop in seconds before committing to a GPU run.
 
+### 5.5 `prepare_parallel.py`
+
+Cleans and splits a **parallel** (bitext) corpus for distillation — the pair-aware analogue of `download_data.py`. Every filter operates on the *pair*, dropping both sides together so line alignment is preserved. Built for de–pl Europarl but the language tags and GlotLID labels are flags.
+
+```
+uv run python scripts/prepare_parallel.py        # defaults to the Europarl de-pl files
+```
+
+| Flag | Default | What it does |
+|---|---|---|
+| `--src-file` / `--tgt-file` | Europarl de-pl paths | The two line-aligned input files. src = German (teacher), tgt = Polish (student). |
+| `--src-lang` / `--tgt-lang` | `de` / `pl` | Tags used in the output filenames. |
+| `--src-glotlid-label` / `--tgt-glotlid-label` | `__label__deu_Latn` / `__label__pol_Latn` | Expected GlotLID label per side. |
+| `--glotlid-threshold` | `0.5` | Minimum confidence for both sides. `--skip-glotlid` skips the step. |
+| `--min-length` / `--max-length` | `3` / `80` | Per-side word-count bounds (Moses `clean-corpus-n` convention). |
+| `--max-ratio` | `3.0` | Max source/target word-count ratio (catches misalignments). |
+| `--max-pairs` | `0` (all) | Subsample before the split. |
+| `--output-dir` | `data/processed/de-pl` | Where the aligned `{train,dev,test}.{src,tgt}` files land. |
+
+Pipeline order: NFC + control-strip → **either-side dedup** (a sentence may appear at most once on *each* side; drop the pair otherwise) → GlotLID both sides → terminal-punct both sides → length + ratio → 90/5/5 split (seed 42). No Moses is applied: the student tokenizer Moses-pretokenizes Polish internally, and the teacher (LaBSE) wants natural German. Per-step drop counts are logged.
+
+### 5.6 `distill.py`
+
+Distills a trained encoder into a cross-lingual **sentence encoder** against LaBSE. Generic over tokenizer/encoder; same `--smoke` / GPU pattern as `pretrain.py`. Full description of objective, pooling, teacher caching, eval metrics, and flags is in §8.
+
+```
+uv run python scripts/distill.py \
+    --encoder models/dsb/xlmr_morfessor_v1 --tokenizer-path models/dsb/morfessor_v1 \
+    --data-dir data/processed/de-pl --output models/dsb/labse_distill_morfessor_v1 --bf16
+```
+
 ---
 
 ## 6. Modularity
@@ -445,9 +482,83 @@ Implementation detail: `preprocess_logits_for_metrics` reduces each batch from f
 
 The saved tokenizer in each checkpoint directory cannot be reloaded via HuggingFace's `AutoTokenizer.from_pretrained` because our custom tokenizer classes are not registered with HF's auto-discovery. Workaround: reload the tokenizer separately via `tokenization/registry.py:load_tokenizer(...).to_hf_tokenizer()` and load the model via `AutoModelForMaskedLM.from_pretrained(checkpoint)`. The model checkpoint itself is a standard HF artifact and reloads normally.
 
+### First-round results
+
+All 5 tokenizers were pretrained on `data/processed/dsb/v1_train.txt` (10 epochs, identical hyperparameters, one H100 each, ~21 min per run). Unsupervised Morfessor wins on BPC by a 0.15-bit/character margin over BPE. Full table, mechanistic reading, and caveats in [EVALUATIONS.md §9](EVALUATIONS.md).
+
 ---
 
-## 8. Caveats
+## 8. Cross-lingual embedding distillation — `scripts/distill.py`
+
+The downstream step after MLM pretraining. Turns a trained encoder into a **sentence encoder** whose embeddings live in LaBSE's multilingual space, so two translations land near each other. The method is the cross-lingual term of Reimers & Gurevych (2020) knowledge distillation.
+
+### Objective
+
+Minimize `MSE(student(polish), LaBSE(german))` over de–pl parallel pairs. The teacher (LaBSE) embeds the German side; the student embeds the Polish side and is trained to match. Because LaBSE already aligns translations, regressing Polish onto the German embedding teaches the student to map Slavic input into LaBSE's space. **Polish is a measurable stand-in for Lower Sorbian** — LaBSE covers Polish (and German) but not dsb, and Lower Sorbian is the West-Slavic relative closest to Polish. The eventual dsb step is identical in form: `student(dsb) → LaBSE(german)` on de–dsb data. Only the cross-lingual term is used (no source-side `student(german) → LaBSE(german)` term) — we never need the student to encode German, so German is left entirely to the teacher.
+
+### Student
+
+`AutoModel.from_pretrained(--encoder)` loads the encoder body of a pretrained model (the MLM head is dropped; an unused pooler is newly initialized and ignored). The sentence embedding is **mean pooling** over the last hidden states weighted by the attention mask (Reimers & Gurevych 2019 — mean beats CLS, and our MLM-only model has no trained CLS sentence representation). Student hidden size 768 equals LaBSE's output dimension, so there is no projection layer. The student is not L2-normalized during training; MSE pulls it onto the unit-norm teacher targets directly. `--freeze-layers N` freezes the embeddings and bottom N encoder layers to retain MLM-init features.
+
+### Teacher and caching
+
+`sentence-transformers/LaBSE`, frozen. Its German embeddings never change, so they are **precomputed once and cached** to `data/processed/de-pl/<split>.de.labse.npy` (fp16, unit-norm), reused across every epoch and every data-size-sweep run — far cheaper than re-running a 470 M-param forward each step, and it frees VRAM during training. `--no-cache-teacher` skips the disk cache.
+
+### Training
+
+HuggingFace `Trainer`, same conventions as `pretrain.py`. Polish is tokenized once via the generic `load_tokenizer(...).to_hf_tokenizer()` (works for any of the five tokenizers); a collator pads the input IDs and stacks the teacher vectors as regression targets. AdamW, linear warmup + decay; defaults `--learning-rate 2e-5`, `--warmup-ratio 0.1`, `--weight-decay 0.01`. The same Slurm caveat as pretraining applies on LRZ (`unset RANK LOCAL_RANK` before launching).
+
+### Eval metrics and anti-collapse selection
+
+Eval runs over a fixed **retrieval pool** (`--eval-pool`, default 1000 pairs — the Tatoeba-standard difficulty):
+
+| Metric | What it is |
+|---|---|
+| `mse` | Mean squared error to the teacher embeddings. Fidelity to LaBSE. |
+| `p1_pl2de` | Bitext retrieval precision@1, Polish→German: for each Polish sentence, is its true German translation the nearest neighbour (cosine)? The Reimers & Gurevych "Accuracy" metric and the **selection metric**. |
+| `p1_de2pl` | Same, German→Polish. |
+| `p1_mean` | Mean of the two directions. |
+
+The failure mode is the student **memorizing Europarl** (collapsing into a LaBSE-clone on the training domain) instead of learning a transferable Slavic→LaBSE function that carries to dsb. Guards: (1) selection on **retrieval, not training loss**; (2) an optional out-of-domain probe `--ood-eval <prefix>` (e.g. Tatoeba de–pl) — when set, selection switches to OOD retrieval and the in-domain-vs-OOD gap is the overfitting diagnostic; (3) a **data-size sweep** via `--max-train-pairs` (subsamples *train* only; dev/test stay fixed), picking the size that maximizes OOD retrieval. A baseline eval of the un-distilled student is logged before training so the lift is visible.
+
+### Output
+
+`encoder.save_pretrained(--output)` (reloads via `AutoModel`) plus `sentence_encoder.json` recording `pooling=mean`, the tokenizer path, the base encoder, and the teacher id. As with pretraining, the tokenizer is reloaded separately via the registry (custom classes aren't in HF auto-discovery).
+
+### Flag reference
+
+| Flag | Default | What it does |
+|---|---|---|
+| `--encoder` | (required) | Trained encoder dir; MLM head ignored. |
+| `--tokenizer-path` | (required) | Matching tokenizer dir (any of the five). |
+| `--output` | (required) | Where the distilled sentence encoder is saved. |
+| `--data-dir` | `data/processed/de-pl` | Holds `{train,dev,test}.{de,pl}`. |
+| `--src-lang` / `--tgt-lang` | `de` / `pl` | Teacher side / student side language tags. |
+| `--ood-eval` | none | Prefix of an OOD eval set; switches selection to OOD retrieval. |
+| `--smoke` | off | 512 train / 128 eval pairs, 20 steps — laptop sanity check (still downloads LaBSE). |
+| `--device` | `auto` | CUDA → MPS → CPU. |
+| `--max-train-pairs` | `0` (all) | Subsample train only (sweep knob); dev/test fixed. |
+| `--eval-pool` | `1000` | Retrieval pool size for in-loop + final eval. |
+| `--teacher-batch-size` | `64` | LaBSE encode batch size. |
+| `--no-cache-teacher` | off | Don't write/read the `.npy` teacher cache. |
+| `--seq-len` | `256` | Student input length. |
+| `--freeze-layers` | `0` | Freeze embeddings + bottom N encoder layers. |
+| `--batch-size`, `--grad-accumulation-steps` | `64`, `1` | Effective batch. |
+| `--num-train-epochs`, `--max-steps` | `5`, `-1` | Epochs, or a hard step cap. |
+| `--learning-rate`, `--warmup-ratio`, `--weight-decay` | `2e-5`, `0.1`, `0.01` | Optimizer. |
+| `--bf16`, `--fp16` | off | Mixed precision (`--bf16` GPU default). |
+| `--save-steps`, `--save-total-limit` | `500`, `3` | Checkpointing. |
+| `--load-best-model-at-end` | off | Keep the best-retrieval checkpoint; enables early stopping. |
+| `--early-stopping-patience` | `3` | Evals without improvement before stopping. |
+| `--resume-from-checkpoint`, `--logging-steps`, `--eval-steps`, `--report-to`, `--seed` | — / `50` / `500` / `none` / `42` | As in pretraining. |
+
+### Dependencies
+
+Adds `sentence-transformers` (for the LaBSE teacher). Installed by `uv sync`.
+
+---
+
+## 9. Caveats
 
 1. **Proxy metrics do not equal downstream quality.** All numbers in this project are sanity checks. Which tokenizer makes a better language model is a separate question that requires a training run.
 2. **Corpus size varies a lot across datasets.** hsb v3 is ~700k sentences, hsb lww is 1.29M, dsb v1 is 239k. All are small by modern NLP standards; lww is the largest and dsb is roughly a third of hsb v3. Per-tokenizer numbers should be read against the dataset they were trained on, not directly compared across.
@@ -456,11 +567,13 @@ The saved tokenizer in each checkpoint directory cannot be reloaded via HuggingF
 5. **`numpy<2` is pinned** because of an upstream incompatibility in `fasttext`. One-line workaround. Removable once `fasttext` is fixed upstream.
 6. **GlotLID adds a one-time download (~1 GB)** when the preprocessing script first runs. Subsequent runs use the HuggingFace cache.
 7. **Morfessor and MorphBPE training scale with corpus size.** Roughly: ~3–5 minutes on dsb v1 (215k train sentences), ~13 minutes on hsb v3 (633k), ~20 minutes on hsb lww (1.16M). SPM BPE and Unigram finish in well under a minute regardless. Budget accordingly when iterating.
-8. **The dsb semi-supervised Morfessor variant (`morfessor_semi`) improves coverage and OOV but widens fertility variance.** Vocab coverage rose 9.6 pp and OOV dropped ~18% relative on dsb v1; fertility (std) went from 0.166 to 0.270 because the length distribution became more bimodal. Implementation detail in §4.5 ("Semi-supervised variant"), numbers in [EVALUATIONS.md §8](EVALUATIONS.md), history (including the tuning sweep that selected the 500-row annotation set) in [CHANGELOG.md](CHANGELOG.md). Two minor follow-ups remain: record the annotations path in the saved `tokenizer_config.json` for reproducibility, and try a richer-than-two-piece annotation source if one becomes available.
+8. **The dsb semi-supervised Morfessor variant (`morfessor_semi`) improves coverage and OOV but widens fertility variance.** Vocab coverage rose 9.6 pp and OOV dropped ~18% relative on dsb v1; fertility (std) went from 0.166 to 0.270 because the length distribution became more bimodal. Implementation detail in §4.5 ("Semi-supervised variant"), intrinsic-metric numbers in [EVALUATIONS.md §8](EVALUATIONS.md), history (including the tuning sweep that selected the 500-row annotation set) in [CHANGELOG.md](CHANGELOG.md). Two minor follow-ups remain: record the annotations path in the saved `tokenizer_config.json` for reproducibility, and try a richer-than-two-piece annotation source if one becomes available. Note also that on the dsb MLM pretraining benchmark ([EVALUATIONS.md §9](EVALUATIONS.md)) `morfessor_semi` underperforms plain `morfessor` despite winning on the intrinsic metrics — the two evaluations disagree, and BPC is the more decision-relevant one for downstream use.
+9. **Intrinsic metrics and MLM-pretraining metrics can disagree.** On dsb v1, `morph_bpe` looks roughly equivalent to `morfessor` on fertility / coverage / OOV but is meaningfully worse on BPC; `morfessor_semi` beats `morfessor` on coverage and OOV but loses to it on BPC. The intrinsic metrics measure properties of the tokenizer; BPC measures how well a downstream LM learns under that tokenizer. When they disagree, BPC is the metric to read for downstream use, intrinsic metrics for understanding what the tokenizer is doing.
+10. **The distillation student tokenizes Polish (and later dsb), never German.** The dsb tokenizer would fragment German heavily; the design avoids this by leaving German entirely to the teacher (LaBSE) and only ever feeding the student Slavic input. Distillation can over-fit Europarl into a LaBSE-clone — guard with the OOD retrieval probe and the data-size sweep (§8), not in-domain fidelity. First distillation results are pending the GPU run.
 
 ---
 
-## 9. Reproduction
+## 10. Reproduction
 
 ```
 uv sync
@@ -551,3 +664,21 @@ uv run python scripts/evaluate.py \
 ```
 
 End-to-end wall-clock time per language is dominated by Morfessor and MorphBPE training (Morfessor scales with corpus size, so dsb is faster than hsb). SPM BPE and Unigram each finish in under a minute.
+
+### Downstream — MLM pretraining and distillation
+
+```
+# MLM-pretrain an encoder on a tokenizer (GPU; see §7)
+uv run python scripts/pretrain.py \
+    --tokenizer-path models/dsb/morfessor_v1 \
+    --corpus data/processed/dsb/v1_train.txt \
+    --eval-corpus data/processed/dsb/v1_dev.txt \
+    --output models/dsb/xlmr_morfessor_v1 --bf16
+
+# Prepare the de-pl parallel corpus, then distill against LaBSE (GPU; see §8)
+uv run python scripts/prepare_parallel.py
+uv run python scripts/distill.py \
+    --encoder models/dsb/xlmr_morfessor_v1 --tokenizer-path models/dsb/morfessor_v1 \
+    --data-dir data/processed/de-pl --output models/dsb/labse_distill_morfessor_v1 \
+    --bf16 --load-best-model-at-end
+```

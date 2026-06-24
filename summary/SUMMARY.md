@@ -103,11 +103,31 @@ Coverage +9.6 pp, OOV −18% relative, fertility mean slightly shorter. Fertilit
 | `tokenization/morfessor_semi.py` | `SemiSupervisedMorfessorTokenizer` — thin subclass that wires a default annotations TSV through to the parent's `train()`. dsb-specific by default. |
 | `tokenization/morph_bpe.py` | `MorphBPETokenizer`, `MorphBPEHFTokenizer` (hybrid Morfessor + BPE). |
 | `scripts/extract_dsb_morph_annotations.py` | Extracts `surface\tstem ending` rows from an Apertium metadix; produces full and paradigm-balanced sampled TSVs. |
+| `scripts/prepare_parallel.py` | Pair-aware cleaning + 90/5/5 split of a parallel (bitext) corpus for distillation. Either-side dedup, GlotLID both sides, terminal-punct, length+ratio. Outputs `data/processed/de-pl/{train,dev,test}.{de,pl}`. |
 | `scripts/pretrain.py` | XLM-R-base MLM pretraining using any trained tokenizer. `--smoke` for laptop validation. Eval reports loss, perplexity, top-1/top-5 accuracy, bits per character. Encoder is intended as the student in a later cross-lingual embedding distillation step. |
+| `scripts/distill.py` | Cross-lingual embedding distillation: `MSE(student(polish), LaBSE(german))`. Mean pooling, cached LaBSE teacher, retrieval-P@1 selection. Generic over tokenizer/encoder; `--smoke` + GPU parity with pretrain. |
 | `tokenization/hf_base.py` | `BaseHFTokenizer` and `SpmBackedHFTokenizer` — shared special-token handling (`[CLS]…[SEP]` wrapping, special-tokens mask, segment IDs) inherited by every HF wrapper. |
 | `tokenization/registry.py` | `TOKENIZER_TYPES`, `load_tokenizer()`, `detect_tokenizer_type()`, `write_config()`, `read_config()` — single source of truth for tokenizer dispatch and the `tokenizer_config.json` schema. |
 | `tokenization/evaluate.py` | All metric functions, `EvaluationResult`, `print_comparison_table`. |
 
 ## MLM pretraining
 
-`scripts/pretrain.py` trains an XLM-RoBERTa-base-shaped encoder from random init using any one of the 5 trained tokenizers. Same code path runs as a `--smoke` test on a laptop (tiny 2-layer model, MPS, ~10 s) and as the real training run on a CUDA GPU (12-layer / 768-hidden / ~110 M params, bf16). Eval reports `eval_loss`, perplexity, top-1/top-5 accuracy at masked positions, and **bits per character** — the last being the tokenization-invariant metric for comparing the 5 tokenizers at downstream LM quality. The resulting encoder is intended as the student in a later cross-lingual embedding distillation step against stock `FacebookAI/xlm-roberta-base`; MLM here is a sensible init, not the final training step. Bringing this online required fixing `BaseHFTokenizer` to wrap inputs with `[CLS]…[SEP]` and produce a correct special-tokens mask — all 5 tokenizers now do so.
+`scripts/pretrain.py` trains an XLM-RoBERTa-base-shaped encoder from random init using any one of the 5 trained tokenizers. Same code path runs as a `--smoke` test on a laptop (tiny 2-layer model, MPS, ~10 s) and as the real training run on a CUDA GPU (12-layer / 768-hidden / ~98 M params after dropping the 250k → 16k vocab embedding, bf16). Eval reports `eval_loss`, perplexity, top-1/top-5 accuracy at masked positions, and **bits per character** — the last being the tokenization-invariant metric for comparing the 5 tokenizers at downstream LM quality. The resulting encoder is intended as the student in a later cross-lingual embedding distillation step against stock `FacebookAI/xlm-roberta-base`; MLM here is a sensible init, not the final training step. Bringing this online required fixing `BaseHFTokenizer` to wrap inputs with `[CLS]…[SEP]` and produce a correct special-tokens mask, plus fixing a vocab-construction bug in `MorfessorTokenizer.train()` that left ID gaps and broke the embedding lookup (both Morfessor variants had to be retrained — see CHANGELOG).
+
+### dsb v1 results (10 epochs, identical hyperparameters per tokenizer, ~21 min each on a single H100)
+
+| Tokenizer | eval_loss | perplexity | top-1 | top-5 | BPC |
+|---|---|---|---|---|---|
+| spm_bpe | 3.33 | 28.0 | 41.5 % | 58.2 % | 1.073 |
+| spm_unigram (epoch 8.3 snapshot) | 2.75 | 15.7 | 50.7 % | 66.1 % | 1.058 |
+| morph_bpe | 2.58 | 13.3 | 52.8 % | 69.5 % | 0.986 |
+| morfessor_semi | 2.53 | 12.6 | 52.6 % | 70.3 % | 0.993 |
+| **morfessor** | **2.32** | **10.3** | **56.1 %** | **73.2 %** | **0.920** |
+
+Headline: unsupervised Morfessor wins by 0.15 BPC over BPE (the field's default), and beats both the BPE-on-morphemes hybrid (`morph_bpe`) and the annotation-supervised variant (`morfessor_semi`). Adding complexity hurt on this corpus and budget. Discussion in `docs/EVALUATIONS.md §9`; metric definitions in `docs/METRICS.md §7`.
+
+## Cross-lingual embedding distillation (LaBSE teacher)
+
+`scripts/distill.py` turns a pretrained encoder into a sentence encoder in LaBSE's space by minimizing `MSE(student(polish), LaBSE(german))` on de–pl Europarl (cross-lingual term of Reimers & Gurevych 2020). Polish is the measurable West-Slavic stand-in for Lower Sorbian (LaBSE covers Polish and German, not dsb); the eventual dsb step is identical in form. Mean pooling (768-dim student = 768-dim LaBSE, no projection); the frozen teacher's German embeddings are precomputed and cached. Selection is on **bitext retrieval P@1** (pl→de) over a held-out pool — not training loss — with an optional out-of-domain (Tatoeba) probe and a `--max-train-pairs` data-size sweep guarding against the student memorizing Europarl into a LaBSE-clone. Same `--smoke`/GPU parity as pretrain; generic over all five tokenizers.
+
+Parallel data is prepped by `scripts/prepare_parallel.py` (pair-aware: either-side dedup, GlotLID deu/pol, terminal-punct, length 3–80 + ratio ≤3): Europarl de–pl 579,166 → 529,522 clean → `data/processed/de-pl/{train,dev,test}.{de,pl}` = 476,569 / 26,476 / 26,477, every sentence unique on both sides. Smoke-validated end-to-end; GPU results pending (see `docs/EVALUATIONS.md §10`, metrics in `docs/METRICS.md §8`).

@@ -438,5 +438,79 @@ The full XLM-R-base architecture (~110 M params) was test-run on a 16 GB M1 Pro 
 
 ### Remaining follow-ups
 
-- Run the GPU training across all 5 tokenizers, report BPC and top-k accuracy in EVALUATIONS.md.
 - Load the parallel data and implement the cross-lingual embedding distillation step.
+
+---
+
+## Morfessor vocab fix — dense IDs
+
+While running the GPU MLM pretraining (next section), the morfessor and morfessor_semi runs crashed inside the embedding lookup with `vectorized_gather_kernel: index out of bounds`. Root cause was in `MorfessorTokenizer.train()` in `tokenization/morfessor.py`: the char and morpheme loops assigned IDs as `start_id + i`, but skipped candidates that already existed in the vocab (e.g. a single-character morpheme like `o`, `a`, `n` that was already added in the char phase). The loop index `i` still advanced, leaving **gaps** in the assigned ID range — so `len(vocab) < target_vocab_size` while `max(vocab.values()) == target_vocab_size − 1`.
+
+Downstream effect: HF code (data collator's random-token replacement, and the model embedding size we set from `tokenizer.vocab_size`) read `len(vocab)`, but the tokenizer could still emit IDs up to the old target. The embedding was sized to ~15,765 entries, the encoder fed an ID of ~15,990 into it, CUDA gather went out of bounds. SPM-based wrappers were fine because SPM guarantees a dense piece-ID range; only the two pure-Morfessor wrappers had the gap.
+
+Fix: switched both loops to a running counter that advances only when a token is actually inserted. IDs are now contiguous from 0 to `len(vocab) − 1`, which is the assumption the rest of the system makes everywhere else. `morfessor_v1` and `morfessor_semi_v1` were retrained on `data/processed/dsb/v1_train.txt`; both produced dense vocabs (15,765 and 16,000 entries respectively, with no missing IDs) and trained the encoder end-to-end without further changes. Other tokenizers were unaffected.
+
+### Why this hadn't surfaced before
+
+The intrinsic evaluator (`scripts/evaluate.py`) never embeds anything — it tokenizes, looks up IDs, and computes string-level metrics. The bug only triggers when an ID is used as an embedding index, which happens for the first time in the MLM pretraining pipeline. The intrinsic round-trip and HF-compatibility tests both passed because they don't touch an embedding layer.
+
+---
+
+## MLM pretraining — first dsb v1 round (all 5 tokenizers)
+
+All 5 tokenizers were trained from random init for 10 epochs each on `v1_train.txt`, with the XLM-R-base architecture and identical hyperparameters (batch 64 × grad-accum 4, LR 5e-4, warmup 0.06, weight decay 0.01, bf16). One H100, ~21 minutes per tokenizer. Full results table and discussion in [EVALUATIONS.md §9](EVALUATIONS.md).
+
+### Headline
+
+| Tokenizer | BPC | rank |
+|---|---|---|
+| morfessor | 0.920 | 1 |
+| morph_bpe | 0.986 | 2 |
+| morfessor_semi | 0.993 | 3 |
+| spm_unigram | ~1.06 | 4 |
+| spm_bpe | 1.073 | 5 |
+
+Unsupervised Morfessor beats every alternative by a clear margin (0.15 BPC over BPE). The BPE-on-morphemes hybrid (`morph_bpe`) and the annotation-supervised variant (`morfessor_semi`) both regress from plain Morfessor — adding complexity hurt on this corpus / vocab budget. Mechanistic reading in EVALUATIONS.md.
+
+### Why this is the right comparison
+
+`scripts/evaluate.py`'s intrinsic metrics rank tokenizers on compactness, coverage, and OOV — they don't say anything about *how well a downstream model can learn from each*. BPC, computed by `scripts/pretrain.py`'s `compute_metrics`, normalizes the masked-position NLL by source-text character count, which is tokenization-invariant. It's the metric that lets the 5 tokenizers be ranked head-to-head. Definition and reading guide in [METRICS.md §7](METRICS.md).
+
+### Caveats
+
+- The hsb equivalents (v3 and lww) have not been run, so the dsb ordering is not yet known to generalize across languages within Sorbian.
+- The encoder is an init for cross-lingual distillation, not a final downstream model. Whether the BPC advantage propagates through distillation is the open question for the next step.
+
+### Remaining follow-ups
+
+- Same MLM comparison on hsb v3 and hsb lww.
+
+---
+
+## Cross-lingual embedding distillation (`scripts/prepare_parallel.py`, `scripts/distill.py`)
+
+The downstream step the MLM encoders were built for. Teacher changed from the originally-planned `xlm-roberta-base` to **LaBSE** — a sentence-embedding model that already aligns translations across 109 languages (incl. German and Polish, but not dsb), so it gives a ready target space for bitext retrieval. The student is distilled to map **Polish** (a measurable West-Slavic stand-in for Lower Sorbian) onto LaBSE's German embeddings; the eventual dsb step is identical in form.
+
+### Parallel data prep — `scripts/prepare_parallel.py`
+
+A pair-aware analogue of `download_data.py`: every filter drops the *pair* so de–pl line alignment is preserved. Pipeline: NFC + control-strip → **either-side dedup** → GlotLID both sides (`deu_Latn` / `pol_Latn`) → terminal-punct both sides → length 3–80 + ratio ≤3 (Moses `clean-corpus-n` convention) → 90/5/5 split (seed 42). No Moses is written into the files — the student tokenizer applies it to Polish internally, and the teacher wants natural German.
+
+The dedup is deliberately **either-side**, not tuple: a sentence may appear at most once on *each* side, so bitext retrieval has exactly one correct target per query. Run on Europarl de–pl: 579,166 → 529,522 clean pairs (biggest cut is the 35,801 either-side duplicates — Europarl procedural boilerplate). Output `data/processed/de-pl/{train,dev,test}.{de,pl}` = 476,569 / 26,476 / 26,477. Verified: alignment preserved, every sentence unique on both sides, zero train↔dev/test leakage.
+
+### Distillation — `scripts/distill.py`
+
+Reimers & Gurevych (2020) MSE distillation, cross-lingual term only: `MSE(student(polish), LaBSE(german))`. Design choices:
+
+- **Mean pooling** for the student sentence embedding (R&G 2019 — mean > CLS, and an MLM-only model has no trained CLS sentence representation). 768-dim student = 768-dim LaBSE → no projection.
+- **Cross-lingual term only.** The original method also keeps `student(source) → teacher(source)` to preserve the source language, but we never need the student to encode German, and its dsb tokenizer would fragment German badly — so German is left entirely to the teacher and the student only ever sees Slavic input. No collapse risk because the per-pair targets are distinct fixed vectors.
+- **Teacher embeddings cached.** LaBSE is frozen, so `LaBSE(german)` is precomputed once to `.npy` (fp16) and reused across epochs and sweep runs — cheaper than re-running a 470 M-param forward each step, and frees VRAM. `--no-cache-teacher` opts out.
+- **Selection on retrieval, not loss.** `metric_for_best_model` is bitext retrieval P@1 (pl→de) over a held-out pool, so early stopping doesn't reward a Europarl-memorizing LaBSE-clone. Optional `--ood-eval` (Tatoeba) switches selection to out-of-domain retrieval; the in-domain-vs-OOD gap is the overfitting diagnostic. `--max-train-pairs` runs a data-size sweep (train only; dev/test fixed).
+- **Pretrain parity.** Same `--smoke` / device-auto / bf16 / checkpoint / tensorboard / Slurm-`unset RANK LOCAL_RANK` structure as `pretrain.py`; generic over all five tokenizers via the registry.
+
+Validated end-to-end with `--smoke` on the M1 (LaBSE loads + embeds, MSE drops 0.32 → 0.12 over 20 steps, retrieval eval + baseline run, encoder + `sentence_encoder.json` saved and reloads via `AutoModel`). New dependency: `sentence-transformers`.
+
+### Remaining follow-ups
+
+- GPU distillation run for the morfessor encoder; report MSE + retrieval P@1 and the data-size sweep in EVALUATIONS.md.
+- Add a Tatoeba de–pl OOD probe under `data/raw/tatoeba-de-pl/` and switch selection to it.
+- Repeat distillation for the other four tokenizers; then the dsb-transfer step on de–dsb data.

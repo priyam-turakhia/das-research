@@ -208,3 +208,74 @@ No single metric tells you which tokenizer is best. Each captures a different pr
 - Side-by-side segmentation tells you whether the splits make linguistic sense.
 
 A tokenizer can win one metric and lose another. The "best" tokenizer for a downstream task is the one whose output a real model can learn from most efficiently — and that requires training a real model.
+
+---
+
+## 7. MLM pretraining metrics
+
+These come from `scripts/pretrain.py`, not `scripts/evaluate.py`. They measure how well a from-scratch XLM-R-base-shaped encoder learns the language under each tokenization, on the same dev split, with everything else held fixed. They are what closes the gap that §1–§6 leave open: ranking the tokenizers by *downstream* quality, not just intrinsic properties. Implementation in `scripts/pretrain.py:make_compute_metrics`.
+
+### `eval_loss`
+
+Mean cross-entropy over the 15% of dev-token positions the collator masked. This is what HF Trainer optimizes against; `--load-best-model-at-end` picks the checkpoint with the lowest value. **Token-space** — not comparable across tokenizers, since each one has a different vocabulary and per-token prediction difficulty.
+
+### `perplexity`
+
+`exp(eval_loss)`. Same information in a more intuitive unit ("model's effective uncertainty per masked token, in vocab-size equivalents"). Reading guide:
+
+- Random init at vocab 16,000: ≈ 16,000.
+- Strong low-resource monolingual MLM at end of training: 10 – 50.
+- English RoBERTa-base on full Wikipedia + BookCorpus: ≈ 4.
+
+Same caveat as `eval_loss`: token-space, not cross-tokenizer fair.
+
+### `top-1`, `top-5`
+
+Fraction of masked positions where the true token is the argmax (`top-1`) or in the model's top 5 predictions (`top-5`). Easy to read but **inflated for tokenizers that produce fewer, more semantically chunked pieces** — Unigram and Morfessor look better here partly because their per-token prediction problem is statistically easier than BPE's, not only because the model learned more. Use these for sanity, not the cross-tokenizer ranking.
+
+### `bpc` — bits per character
+
+The cross-tokenizer fair metric. `(total NLL on masked positions / mlm_probability) / corpus_char_count / log(2)`.
+
+The denominator is **source-text character count**, which is the same number regardless of which tokenizer you used — so BPC normalizes away each tokenizer's fertility. The `1 / mlm_probability` factor extrapolates the NLL from "the 15% of positions actually scored" to the whole text, assuming the masked sample is representative. Result is in bits per character.
+
+Reading guide:
+
+- 2.0+ — early training or essentially random.
+- 1.2–1.5 — model has learned real linguistic structure; in the range of low-resource published monolingual MLMs (AfriBERTa, TigrinyaBERT etc.).
+- 0.9–1.1 — strong low-resource result.
+- ≤ 0.9 — saturated for this corpus size, or you have a lot of data.
+
+For the comparison this project is set up to do — *which tokenization makes a better language model at fixed vocab budget on the same corpus* — **BPC is the metric to read.** Differences in `eval_loss` and perplexity across tokenizers can be entirely explained by tokenization-induced difficulty; differences in BPC cannot.
+
+### Implementation note
+
+`preprocess_logits_for_metrics` in the script reduces each batch from `(B, L, V)` logits to `(top-5 indices, per-token NLL)` *before* Trainer accumulates across the eval set. Without this step, accumulating full logits exhausts memory on any dev set of nontrivial size. The top-5 indices and the NLL at the label position are everything the compute function needs.
+
+---
+
+## 8. Cross-lingual distillation metrics
+
+From `scripts/distill.py`. They measure how well the distilled sentence encoder places one language's sentences next to their translations in LaBSE's space. Evaluated over a fixed **retrieval pool** of `--eval-pool` pairs (default 1000 — the Tatoeba-standard difficulty; a larger pool is a harder retrieval problem because there are more distractors). Implementation in `scripts/distill.py:retrieval_metrics`.
+
+### `mse`
+
+Mean squared error between the student's pooled sentence embedding and the teacher's (LaBSE's) embedding of the parallel sentence — the training objective itself. Lower = the student reproduces LaBSE more faithfully. On its own it's a fidelity number, not a quality one: a model can drive MSE down by memorizing the training domain without learning a transferable mapping. Read it alongside retrieval, not instead of it.
+
+### `p1_pl2de`, `p1_de2pl` — bitext retrieval precision@1
+
+The standard cross-lingual sentence-embedding metric (Reimers & Gurevych's "Accuracy"; the Tatoeba/BUCC family). Embed every Polish sentence with the student and every German sentence with LaBSE, build the cosine-similarity matrix over the pool, and ask: for each query, is its true translation the single nearest neighbour?
+
+- `p1_pl2de` — Polish query → German index. **This is the selection metric**, because it matches the eventual dsb→de use (Slavic input retrieved against the German anchor).
+- `p1_de2pl` — German query → Polish index (the reverse).
+- `p1_mean` — average of the two.
+
+Reading guide (P@1 over a ~1000-pair pool):
+
+- ~0.001 (≈ 1/pool) — chance; an un-distilled random-init student sits here.
+- 0.3–0.6 — the student has learned a real cross-lingual mapping.
+- 0.8+ — strong alignment; LaBSE itself is in this range on clean Tatoeba pairs.
+
+### Why retrieval, not loss, is the selection metric
+
+Selecting the checkpoint with the lowest training MSE rewards a student that has collapsed into a LaBSE-clone *on the training domain* — which need not transfer to dsb and would wash out tokenizer differences. Retrieval P@1 on a held-out pool measures whether translations actually end up nearest each other. The strongest guard is the **out-of-domain** probe (`--ood-eval`, e.g. Tatoeba de–pl): when present, selection runs on OOD retrieval and the **in-domain-minus-OOD P@1 gap** is the overfitting diagnostic — a large gap means the model memorized Europarl rather than learning a general Slavic→LaBSE map.
