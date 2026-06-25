@@ -18,3 +18,6 @@ models/
 
 # Local tool config
 .claude/
+
+# macOS
+.DS_Store

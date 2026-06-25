@@ -125,6 +125,10 @@ def csls_mine(x: np.ndarray, y: np.ndarray, k: int, device, chunk: int = 1024):
     to the k nearest neighbours in the other language (local scaling, the hubness
     fix that plain cosine retrieval lacks). Chunked so large target pools fit.
     """
+    # Similarity math: CUDA if available (GPU box has the memory), else CPU.
+    # We avoid MPS here — large pools' chunked sim matrices OOM the MPS limit,
+    # and the embeddings are small enough (~hundreds of MB) that CPU is fine.
+    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     xt = torch.as_tensor(x, dtype=torch.float32, device=device)
     yt = torch.as_tensor(y, dtype=torch.float32, device=device)
     nx, ny = xt.shape[0], yt.shape[0]
@@ -238,6 +242,15 @@ def main() -> None:
                     Path(args.de_cache) if args.de_cache else None)
 
     best_j, scores = csls_mine(x, y, args.csls_k, device)
+
+    # Threshold-free retrieval: for each gold dsb sentence, is its single nearest
+    # German (ignoring the cutoff) the true one? Isolates pure retrieval quality
+    # from threshold calibration — separates "model can't rank it" from "threshold
+    # threw it away".
+    dsb_index = {sid: i for i, sid in enumerate(dsb_ids)}
+    hits = sum(1 for src, trg in gold.items() if de_ids[best_j[dsb_index[src]]] == trg)
+    print(f"[mine] retrieval P@1 (no threshold, pool of {len(de_ids)}): "
+          f"{hits}/{len(gold)} = {hits / len(gold):.4f}")
 
     if args.threshold_mode == "dynamic":
         tau = float(scores.mean() + args.threshold * scores.std())

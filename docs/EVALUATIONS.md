@@ -387,20 +387,48 @@ Raw training logs (per-step train loss, eval at every 500 steps, BPC trajectory)
 
 ---
 
-## 10. Cross-lingual embedding distillation — setup (results pending)
+## 10. Cross-lingual embedding distillation — morfessor (first run)
 
-The downstream evaluation the encoders were built for is now wired up (`scripts/distill.py`); the GPU run and its numbers are pending, so this records the protocol.
+The downstream step (`scripts/distill.py`): distill the dsb morfessor encoder into a sentence encoder in LaBSE's space by minimizing `MSE(student(polish), LaBSE(german))` on de–pl Europarl. Polish is the measurable West-Slavic stand-in for Lower Sorbian. Teacher = `sentence-transformers/LaBSE` (768-dim, frozen, cached). Protocol and metric definitions in [METRICS.md §8–9](METRICS.md). One H100, early-stopped at epoch 3.29 (of 5) on the dev retrieval metric.
 
-**Task.** Distill a pretrained encoder into a sentence encoder that maps Slavic input into LaBSE's space, by minimizing `MSE(student(polish), LaBSE(german))` on de–pl Europarl. Polish stands in for Lower Sorbian (LaBSE covers neither dsb nor is there enough dsb parallel data yet; Lower Sorbian is the closest high-resource West-Slavic relative). Teacher = `sentence-transformers/LaBSE` (768-dim, frozen, embeddings cached).
+### In-domain (Europarl de–pl) retrieval P@1, ~1000-pair held-out pool
 
-**Data.** `data/processed/de-pl/{train,dev,test}.{de,pl}` = 476,569 / 26,476 / 26,477 pairs from Europarl, cleaned pair-wise (either-side dedup, GlotLID deu/pol, terminal-punct, length 3–80 + ratio ≤3). See [CHANGELOG.md](CHANGELOG.md).
+| | pl→de | de→pl | mean | MSE |
+|---|---|---|---|---|
+| baseline (un-distilled student) | 0.001 | 0.002 | 0.0015 | 0.317 |
+| distilled — dev | 0.945 | 0.983 | 0.964 | 0.00054 |
+| distilled — test | 0.941 | 0.979 | 0.960 | 0.00054 |
 
-**Metrics** (definitions in [METRICS.md §8](METRICS.md)): MSE to teacher, and bitext retrieval **P@1** both directions over a held-out ~1000-pair pool. Selection metric is `p1_pl2de` (Polish→German), matching the eventual dsb→de direction. A baseline eval of the un-distilled student (≈ chance retrieval) is logged before training to show the lift.
+Chance → 0.94 on the hard direction; dev ≈ test (no overfitting). This proves the method works. **One required fix:** the student embedding must be L2-normalized before the MSE, or the loss collapses to predicting the target centroid (MSE ≈ 1/768, chance retrieval) — see [CHANGELOG.md](CHANGELOG.md). `de→pl > pl→de` throughout is the standard hubness asymmetry (cancelled by CSLS in the mining eval below).
 
-**Anti-collapse protocol.** The risk is the student memorizing Europarl into a LaBSE-clone that doesn't transfer to dsb and washes out tokenizer differences. Guards: select on retrieval (not loss); an optional out-of-domain probe (`--ood-eval`, Tatoeba de–pl) with the in-domain-vs-OOD gap as the diagnostic; and a data-size sweep (`--max-train-pairs ∈ {100k, 250k, all}`, dev/test fixed) choosing the size that maximizes OOD retrieval.
+### dsb transfer (zero-shot — dsb was never in distillation)
 
-Expected reporting once the GPU run lands: a baseline-vs-final table of MSE and both-direction P@1 per training size, then the same distillation repeated across the five tokenizers (does the morfessor BPC advantage carry into the distilled space?), and finally the dsb-transfer probe on de–dsb data.
+dsb retrieval leans entirely on the dsb MLM-pretraining + Polish↔dsb similarity; the distillation never saw a dsb sentence. Evaluated with `scripts/mine_eval.py` (student embeds dsb, LaBSE embeds German — both in LaBSE space; CSLS scoring).
+
+**(a) Clean parallel retrieval** — PaSeMiLL `parallel_de-dsb_*`, 1,352 aligned pairs, CSLS P@1:
+
+| | dsb→de | de→dsb | mean |
+|---|---|---|---|
+| un-distilled student | 0.000 | 0.001 | 0.0004 (chance) |
+| distilled | 0.107 | 0.164 | **0.136** |
+
+Distillation moved dsb from chance to a real (if modest) signal — confirming zero-shot transfer happens.
+
+**(b) BUCC test mining** — PaSeMiLL benchmark, 44,615 dsb × 67,512 de pool, 901 gold pairs:
+
+| metric | value |
+|---|---|
+| retrieval P@1 (no threshold) | 19 / 902 = **0.021** |
+| BUCC F1 (CSLS + dynamic threshold) | **0.005** (P 0.004, R 0.007, tp 6) |
+
+Over the realistic 67k-sentence pool the signal mostly evaporates: only 2.1% of gold dsb sentences rank their true German first even with no threshold, and the dynamic threshold further cuts that to 6 confirmed pairs. The threshold-free number isolates the cause — it's primarily a **retrieval-quality** limit (the model can't rank well in a big pool), not just threshold mis-calibration.
+
+### Reading it
+
+Zero-shot-via-Polish gives dsb a weak but genuine alignment (chance → 13.6% on a 1.3k pool, 2.1% on a 67k pool), **far too weak for real bitext mining**. The numbers are consistent across pool sizes — the weak signal simply doesn't survive 50× more distractors. The clear next lever is **distilling on actual de–dsb parallel data** rather than zero-shot transfer.
 
 ## 11. What's still missing
 
-The same MLM comparison on hsb v3 and hsb lww would establish whether the dsb ordering is corpus-specific or language-general. The distillation results (§10) are pending the GPU run. The genuine end goal — dsb sentence embeddings — needs the de–dsb transfer step (the German side of the MT pairs, not yet on disk) once the Polish-proxy distillation is validated.
+- Run the same distillation + dsb eval across the other four tokenizers — same dsb test, only the tokenizer differs, so it answers "which tokenizer transfers best to dsb" (morfessor's bar: parallel mean 0.136). Whether the morfessor BPC advantage carries into the distilled space is the open question.
+- **Distill on real de–dsb parallel data** (not zero-shot via Polish) — the path to a genuinely useful dsb encoder and a non-trivial BUCC F1.
+- The same MLM comparison on hsb v3 / hsb lww would establish whether the dsb tokenizer ordering is language-general.

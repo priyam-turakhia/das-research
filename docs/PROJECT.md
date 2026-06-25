@@ -66,6 +66,7 @@ das-research/
 │   ├── evaluate.py                Evaluates one or more trained tokenizers
 │   ├── pretrain.py                XLM-R-base MLM pretraining using any trained tokenizer
 │   ├── distill.py                 Cross-lingual embedding distillation (LaBSE teacher)
+│   ├── mine_eval.py               de–dsb bitext mining / retrieval eval of a distilled encoder
 │   └── extract_dsb_morph_annotations.py   Apertium metadix → semi-supervised annotation TSV
 ├── models/
 │   ├── hsb/                       Upper Sorbian trained tokenizers
@@ -386,6 +387,26 @@ uv run python scripts/distill.py \
     --data-dir data/processed/de-pl --output models/dsb/labse_distill_morfessor_v1 --bf16
 ```
 
+### 5.7 `mine_eval.py`
+
+Evaluates a distilled encoder on **de–dsb** by embedding dsb with the student and German with LaBSE (both in LaBSE's space; cross-model by design) and measuring how well it pairs them. Two modes:
+
+- `--parallel`: plain line-aligned files → CSLS retrieval P@1 both directions over the 1:1 pool.
+- default (BUCC): `<id>\t<sentence>` pools + a gold pair list → CSLS scoring, a dynamic threshold, and precision/recall/F1 (the PaSeMiLL protocol), plus a threshold-free retrieval P@1 that isolates retrieval quality from threshold calibration. Gold pairs whose sentences aren't in the pools are dropped (and warned about).
+
+```
+# clean parallel retrieval
+uv run python scripts/mine_eval.py --encoder models/dsb/labse_distill_morfessor_v1 \
+    --tokenizer-path models/dsb/morfessor_v1 --parallel \
+    --dsb-file <prefix>.dsb --de-file <prefix>.de
+# BUCC mining
+uv run python scripts/mine_eval.py --encoder models/dsb/labse_distill_morfessor_v1 \
+    --tokenizer-path models/dsb/morfessor_v1 \
+    --dsb-file dsb-de.test.dsb --de-file dsb-de.test.de --gold dsb-de.test.gold
+```
+
+Metrics defined in [METRICS.md §9](METRICS.md); first-run numbers in [EVALUATIONS.md §10](EVALUATIONS.md). The CSLS similarity math runs on CPU/CUDA (not MPS, which OOMs on large pools).
+
 ---
 
 ## 6. Modularity
@@ -569,7 +590,8 @@ Adds `sentence-transformers` (for the LaBSE teacher). Installed by `uv sync`.
 7. **Morfessor and MorphBPE training scale with corpus size.** Roughly: ~3–5 minutes on dsb v1 (215k train sentences), ~13 minutes on hsb v3 (633k), ~20 minutes on hsb lww (1.16M). SPM BPE and Unigram finish in well under a minute regardless. Budget accordingly when iterating.
 8. **The dsb semi-supervised Morfessor variant (`morfessor_semi`) improves coverage and OOV but widens fertility variance.** Vocab coverage rose 9.6 pp and OOV dropped ~18% relative on dsb v1; fertility (std) went from 0.166 to 0.270 because the length distribution became more bimodal. Implementation detail in §4.5 ("Semi-supervised variant"), intrinsic-metric numbers in [EVALUATIONS.md §8](EVALUATIONS.md), history (including the tuning sweep that selected the 500-row annotation set) in [CHANGELOG.md](CHANGELOG.md). Two minor follow-ups remain: record the annotations path in the saved `tokenizer_config.json` for reproducibility, and try a richer-than-two-piece annotation source if one becomes available. Note also that on the dsb MLM pretraining benchmark ([EVALUATIONS.md §9](EVALUATIONS.md)) `morfessor_semi` underperforms plain `morfessor` despite winning on the intrinsic metrics — the two evaluations disagree, and BPC is the more decision-relevant one for downstream use.
 9. **Intrinsic metrics and MLM-pretraining metrics can disagree.** On dsb v1, `morph_bpe` looks roughly equivalent to `morfessor` on fertility / coverage / OOV but is meaningfully worse on BPC; `morfessor_semi` beats `morfessor` on coverage and OOV but loses to it on BPC. The intrinsic metrics measure properties of the tokenizer; BPC measures how well a downstream LM learns under that tokenizer. When they disagree, BPC is the metric to read for downstream use, intrinsic metrics for understanding what the tokenizer is doing.
-10. **The distillation student tokenizes Polish (and later dsb), never German.** The dsb tokenizer would fragment German heavily; the design avoids this by leaving German entirely to the teacher (LaBSE) and only ever feeding the student Slavic input. Distillation can over-fit Europarl into a LaBSE-clone — guard with the OOD retrieval probe and the data-size sweep (§8), not in-domain fidelity. First distillation results are pending the GPU run.
+10. **The distillation student tokenizes Polish (and later dsb), never German.** The dsb tokenizer would fragment German heavily; the design avoids this by leaving German entirely to the teacher (LaBSE) and only ever feeding the student Slavic input. Distillation can over-fit Europarl into a LaBSE-clone — guard with the OOD retrieval probe and the data-size sweep (§8), not in-domain fidelity.
+11. **dsb transfer via the Polish proxy is weak (zero-shot).** The morfessor distillation hits 0.94 in-domain (Europarl) but only 0.136 parallel retrieval / 0.005 BUCC F1 on de–dsb — the student never saw dsb during distillation, and the transfer signal doesn't survive a realistic mining pool ([EVALUATIONS.md §10](EVALUATIONS.md)). A weak-but-real result, not a bug (the identical embedding code gives 0.94 on Polish). The fix is direct de–dsb distillation, not eval-side tweaks.
 
 ---
 

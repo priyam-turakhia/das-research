@@ -279,3 +279,25 @@ Reading guide (P@1 over a ~1000-pair pool):
 ### Why retrieval, not loss, is the selection metric
 
 Selecting the checkpoint with the lowest training MSE rewards a student that has collapsed into a LaBSE-clone *on the training domain* — which need not transfer to dsb and would wash out tokenizer differences. Retrieval P@1 on a held-out pool measures whether translations actually end up nearest each other. The strongest guard is the **out-of-domain** probe (`--ood-eval`, e.g. Tatoeba de–pl): when present, selection runs on OOD retrieval and the **in-domain-minus-OOD P@1 gap** is the overfitting diagnostic — a large gap means the model memorized Europarl rather than learning a general Slavic→LaBSE map.
+
+---
+
+## 9. de–dsb mining metrics (`scripts/mine_eval.py`)
+
+The downstream test for a distilled encoder: given German and Lower Sorbian sentences, how well does it pair translations? The student embeds dsb, LaBSE embeds German (both already in LaBSE's space), and similarity uses **CSLS**.
+
+### CSLS
+
+`CSLS(x, y) = 2·cos(x, y) − r_k(x) − r_k(y)`, where `r_k` is the mean cosine to the k nearest neighbours in the *other* language (k=20). It subtracts each side's neighbourhood density, which corrects the *hubness* that plain cosine retrieval suffers (some vectors are everyone's nearest neighbour). Note CSLS *scores* are centred near zero by construction — a small positive margin (e.g. 0.02) does **not** mean the cosine collapsed; it means the true match is only slightly closer than the hubs.
+
+### Retrieval P@1
+
+Over a parallel set (`--parallel`), for each sentence is its true translation the single nearest neighbour by CSLS? Reported both directions. Same metric as §8 but with CSLS scoring and over the full candidate pool, so it falls with pool size (finding the needle among 67k is far harder than among 1k).
+
+### BUCC precision / recall / F1
+
+The PaSeMiLL mining protocol. Mine a best German match per dsb sentence, keep pairs whose CSLS score clears a **dynamic threshold** (`mean + λ·std`, λ=2), and score against the gold pair list: precision = correct / predicted, recall = correct / |gold|, F1 the harmonic mean. Reflects both retrieval quality *and* threshold calibration.
+
+### Threshold-free retrieval P@1 (the diagnostic)
+
+For the gold dsb sentences, the fraction whose single nearest German (ignoring the threshold) is the true one. It separates the two ways BUCC F1 can be low: if this is also ~0 the model genuinely can't rank in the pool (retrieval problem); if it's well above the F1's recall, the threshold is throwing away good matches (calibration problem). The two have different fixes — a better model vs. a better threshold.

@@ -515,6 +515,24 @@ The first GPU distillation run collapsed: `eval_mse` crashed to ≈ 1/768 (the f
 
 ### Remaining follow-ups
 
-- GPU distillation run for the morfessor encoder; report MSE + retrieval P@1 and the data-size sweep in EVALUATIONS.md.
 - Add a Tatoeba de–pl OOD probe under `data/raw/tatoeba-de-pl/` and switch selection to it.
-- Repeat distillation for the other four tokenizers; then the dsb-transfer step on de–dsb data.
+- Repeat distillation for the other four tokenizers.
+
+---
+
+## Morfessor distillation run + de–dsb mining eval (`scripts/mine_eval.py`)
+
+Ran the morfessor distillation on Europarl de–pl (H100, early-stopped epoch 3.29). In-domain retrieval P@1 went 0 → 0.94 (pl→de) / 0.96 mean, dev ≈ test — the normalization fix above was required to get there. Full table in [EVALUATIONS.md §10](EVALUATIONS.md).
+
+Added `scripts/mine_eval.py` to evaluate a distilled encoder on **de–dsb** (the real target): the student embeds dsb, LaBSE embeds German (cross-model — both live in LaBSE's space; how LaBSE-distillation is standardly evaluated). Two modes — `--parallel` (CSLS retrieval P@1 over a 1:1 set) and BUCC (CSLS + dynamic threshold + precision/recall/F1, the PaSeMiLL protocol) — plus a **threshold-free retrieval P@1** that separates retrieval failure from threshold mis-calibration. Metrics in [METRICS.md §9](METRICS.md).
+
+**dsb result (zero-shot — dsb never in distillation):** chance → 0.136 on the clean 1,352-pair parallel set, but 0.005 F1 / 0.021 retrieval P@1 on the BUCC test (44k × 67k pool). The transfer signal is real but too weak to survive a realistic mining pool; the threshold-free number confirms it's a retrieval-quality limit, not just threshold calibration. A reviewer hypothesis that this was a pooling/normalization bug was ruled out: the identical embedding code gives 0.94 on Polish, so extraction is correct; the dsb weakness is genuine zero-shot transfer.
+
+### Notes
+
+- **CSLS similarity runs on CPU/CUDA, not MPS** — large pools (67k targets) OOM the MPS memory limit; CPU has the RAM and the embeddings are small.
+
+### Remaining follow-ups
+
+- Run the parallel + BUCC dsb eval across the other four distilled tokenizers (the tokenizer comparison on the real target).
+- Direct de–dsb distillation (train on de–dsb parallel data instead of zero-shot via Polish) — the path to a non-trivial dsb encoder.

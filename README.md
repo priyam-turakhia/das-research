@@ -83,6 +83,8 @@ uv run python scripts/distill.py \
 
 Selection metric is **bitext retrieval P@1** (pl→de) over a held-out pool, not training loss. Add `--ood-eval <prefix>` (e.g. Tatoeba de–pl) to select on out-of-domain retrieval and watch the in-domain-vs-OOD gap — the guard against the student overfitting Europarl into LaBSE. Sweep training size with `--max-train-pairs {100000,250000,0}` (dev/test stay fixed). LaBSE teacher embeddings are precomputed and cached to `.npy`; `--no-cache-teacher` disables the disk cache.
 
+`scripts/mine_eval.py` then evaluates the distilled encoder on **de–dsb** (student embeds dsb, LaBSE embeds German) — CSLS retrieval P@1 on a parallel set, or BUCC mining precision/recall/F1. First morfessor run: in-domain Europarl retrieval 0 → **0.94**, but dsb transfer is zero-shot and weak (parallel **0.136**, BUCC F1 **0.005**); see [docs/EVALUATIONS.md §10](docs/EVALUATIONS.md).
+
 ## Documentation
 
 - [docs/PROJECT.md](docs/PROJECT.md) — full description of the project as it stands today: directory layout, data pipeline, library code file by file, scripts and flags, modularity, caveats. Self-contained.
