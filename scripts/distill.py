@@ -155,8 +155,13 @@ class DistillCollator:
         return batch
 
 
-def retrieval_metrics(student: np.ndarray, teacher: np.ndarray) -> dict:
-    """MSE + bitext retrieval P@1 both directions over the eval pool (cosine argmax)."""
+def retrieval_metrics(student: np.ndarray, teacher: np.ndarray, tgt: str = "tgt", src: str = "src") -> dict:
+    """MSE + bitext retrieval P@1 both directions over the eval pool (cosine argmax).
+
+    Keys are language-tagged so the numbers read unambiguously: `p1_{tgt}2{src}` is
+    the student(tgt)->teacher(src) direction — the selection metric — and matches the
+    real use (e.g. dsb->de). `p1_{src}2{tgt}` is the reverse.
+    """
     student = student.astype(np.float32)
     teacher = teacher.astype(np.float32)
     s = student / (np.linalg.norm(student, axis=1, keepdims=True) + 1e-9)
@@ -164,17 +169,19 @@ def retrieval_metrics(student: np.ndarray, teacher: np.ndarray) -> dict:
     sims = s @ t.T
     n = len(s)
     idx = np.arange(n)
-    pl2de = float((sims.argmax(axis=1) == idx).mean())
-    de2pl = float((sims.argmax(axis=0) == idx).mean())
+    t2s = float((sims.argmax(axis=1) == idx).mean())   # student(tgt) query -> teacher(src)
+    s2t = float((sims.argmax(axis=0) == idx).mean())   # teacher(src) query -> student(tgt)
     mse = float(((student - teacher) ** 2).mean())
-    return {"mse": mse, "p1_pl2de": pl2de, "p1_de2pl": de2pl, "p1_mean": (pl2de + de2pl) / 2}
+    return {"mse": mse, f"p1_{tgt}2{src}": t2s, f"p1_{src}2{tgt}": s2t, "p1_mean": (t2s + s2t) / 2}
 
 
-def compute_metrics(eval_pred) -> dict:
-    preds = eval_pred.predictions
-    if isinstance(preds, tuple):
-        preds = preds[0]
-    return retrieval_metrics(np.asarray(preds), np.asarray(eval_pred.label_ids))
+def make_compute_metrics(tgt: str, src: str):
+    def compute_metrics(eval_pred) -> dict:
+        preds = eval_pred.predictions
+        if isinstance(preds, tuple):
+            preds = preds[0]
+        return retrieval_metrics(np.asarray(preds), np.asarray(eval_pred.label_ids), tgt, src)
+    return compute_metrics
 
 
 def preprocess_logits_for_metrics(logits, labels):
@@ -207,8 +214,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--src-lang", default="de")
     p.add_argument("--tgt-lang", default="pl")
     p.add_argument("--ood-eval", default=None,
-                   help="Prefix of an out-of-domain eval set (<prefix>.<src> / .<tgt>), e.g. Tatoeba. "
-                        "When set, selection switches to OOD retrieval P@1.")
+                   help="Prefix of an out-of-domain / transfer eval set (<prefix>.<src> / <prefix>.<ood-tgt-lang>). "
+                        "When set, selection switches to this set's retrieval P@1.")
+    p.add_argument("--ood-tgt-lang", default=None,
+                   help="Student-side language of --ood-eval if different from --tgt-lang. "
+                        "e.g. train on de-pl but monitor dsb transfer: --ood-eval …/de-dsb/dev --ood-tgt-lang dsb.")
     # Mode
     p.add_argument("--smoke", action="store_true")
     p.add_argument("--device", default="auto", choices=["auto", "cuda", "mps", "cpu"])
@@ -309,10 +319,11 @@ def main() -> None:
     test_pl, test_teacher = make_pool(test_pl, test_teacher, args.eval_pool, args.seed)
     test_ds = build_dataset(test_pl, test_teacher, tokenizer, args.seq_len)
 
+    ood_tgt = args.ood_tgt_lang or tgt   # student-side language of the OOD/transfer probe
     ood_ds = None
     if args.ood_eval:
         ood_prefix = Path(args.ood_eval)
-        ood_pl = read_lines(ood_prefix.with_suffix(f".{tgt}"), eval_limit)
+        ood_pl = read_lines(ood_prefix.with_suffix(f".{ood_tgt}"), eval_limit)
         ood_de = read_lines(ood_prefix.with_suffix(f".{src}"), eval_limit)
         ood_teacher = teacher_embeddings(
             ood_de, device, args.teacher_batch_size,
@@ -330,12 +341,19 @@ def main() -> None:
     # Selection runs on OOD when provided, else the held-out in-domain dev pool.
     select_ds = ood_ds if ood_ds is not None else dev_ds
     select_name = "OOD" if ood_ds is not None else "dev"
+    select_tgt = ood_tgt if ood_ds is not None else tgt
+    fwd_key = f"p1_{select_tgt}2{src}"   # the selection direction, e.g. p1_dsb2de / p1_pl2de
+
+    # (name, dataset, student-side lang) — the lang drives the metric labels per set.
+    eval_sets = [("dev", dev_ds, tgt), ("test", test_ds, tgt)]
+    if ood_ds is not None:
+        eval_sets.append(("OOD", ood_ds, ood_tgt))
 
     # --- Baseline (un-distilled student) ---
     print("[distill] baseline (before training):")
-    for name, ds in [("dev", dev_ds), ("test", test_ds)] + ([("OOD", ood_ds)] if ood_ds else []):
+    for name, ds, st in eval_sets:
         s, t = embed_pool(distiller, ds, collator, device, args.batch_size)
-        print(f"  baseline {name:4s}: {retrieval_metrics(s, t)}")
+        print(f"  baseline {name:4s}: {retrieval_metrics(s, t, st, src)}")
 
     report_to = [s.strip() for s in args.report_to.split(",") if s.strip() and s.strip() != "none"]
     training_args = TrainingArguments(
@@ -360,7 +378,7 @@ def main() -> None:
         save_steps=args.save_steps if not args.smoke else args.max_steps,
         save_total_limit=args.save_total_limit,
         load_best_model_at_end=args.load_best_model_at_end,
-        metric_for_best_model="p1_pl2de" if args.load_best_model_at_end else None,
+        metric_for_best_model=fwd_key if args.load_best_model_at_end else None,
         greater_is_better=True if args.load_best_model_at_end else None,
         label_names=["labels"],
         remove_unused_columns=False,
@@ -371,14 +389,14 @@ def main() -> None:
     if args.load_best_model_at_end:
         callbacks.append(EarlyStoppingCallback(early_stopping_patience=args.early_stopping_patience))
 
-    print(f"[distill] selection metric: {select_name} retrieval p1_pl2de")
+    print(f"[distill] selection metric: {select_name} retrieval {fwd_key}")
     trainer = Trainer(
         model=distiller,
         args=training_args,
         train_dataset=train_ds,
         eval_dataset=select_ds,
         data_collator=collator,
-        compute_metrics=compute_metrics,
+        compute_metrics=make_compute_metrics(select_tgt, src),
         preprocess_logits_for_metrics=preprocess_logits_for_metrics,
         callbacks=callbacks,
     )
@@ -387,9 +405,9 @@ def main() -> None:
 
     # --- Final report (best model) ---
     print("[distill] final (after training):")
-    for name, ds in [("dev", dev_ds), ("test", test_ds)] + ([("OOD", ood_ds)] if ood_ds else []):
+    for name, ds, st in eval_sets:
         s, t = embed_pool(distiller, ds, collator, device, args.batch_size)
-        print(f"  final {name:4s}: {retrieval_metrics(s, t)}")
+        print(f"  final {name:4s}: {retrieval_metrics(s, t, st, src)}")
 
     # --- Save sentence encoder ---
     out = Path(args.output)
