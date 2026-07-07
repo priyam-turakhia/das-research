@@ -248,7 +248,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--save-steps", type=int, default=500)
     p.add_argument("--save-total-limit", type=int, default=3)
     p.add_argument("--resume-from-checkpoint", default=None)
-    p.add_argument("--load-best-model-at-end", action="store_true")
+    p.add_argument("--load-best-model-at-end", action="store_true",
+                   help="Keep the checkpoint with the best selection metric (does NOT early-stop).")
+    p.add_argument("--early-stopping", action="store_true",
+                   help="Stop once the selection metric stops improving. Implies keeping the best "
+                        "checkpoint. Off by default — a noisy metric (e.g. dsb probe) can trip it early.")
     p.add_argument("--early-stopping-patience", type=int, default=3)
     # Logging / eval
     p.add_argument("--logging-steps", type=int, default=50)
@@ -343,6 +347,7 @@ def main() -> None:
     select_name = "OOD" if ood_ds is not None else "dev"
     select_tgt = ood_tgt if ood_ds is not None else tgt
     fwd_key = f"p1_{select_tgt}2{src}"   # the selection direction, e.g. p1_dsb2de / p1_pl2de
+    keep_best = args.load_best_model_at_end or args.early_stopping  # early-stop implies keep-best
 
     # (name, dataset, student-side lang) — the lang drives the metric labels per set.
     eval_sets = [("dev", dev_ds, tgt), ("test", test_ds, tgt)]
@@ -377,16 +382,17 @@ def main() -> None:
         save_strategy="steps",
         save_steps=args.save_steps if not args.smoke else args.max_steps,
         save_total_limit=args.save_total_limit,
-        load_best_model_at_end=args.load_best_model_at_end,
-        metric_for_best_model=fwd_key if args.load_best_model_at_end else None,
-        greater_is_better=True if args.load_best_model_at_end else None,
+        # Early stopping needs the best checkpoint tracked, so it implies keep-best.
+        load_best_model_at_end=keep_best,
+        metric_for_best_model=fwd_key if keep_best else None,
+        greater_is_better=True if keep_best else None,
         label_names=["labels"],
         remove_unused_columns=False,
         dataloader_num_workers=0,
     )
 
     callbacks = []
-    if args.load_best_model_at_end:
+    if args.early_stopping:
         callbacks.append(EarlyStoppingCallback(early_stopping_patience=args.early_stopping_patience))
 
     print(f"[distill] selection metric: {select_name} retrieval {fwd_key}")
