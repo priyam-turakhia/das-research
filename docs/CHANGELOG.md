@@ -536,3 +536,15 @@ Added `scripts/mine_eval.py` to evaluate a distilled encoder on **de–dsb** (th
 
 - Run the parallel + BUCC dsb eval across the other four distilled tokenizers (the tokenizer comparison on the real target).
 - Direct de–dsb distillation (train on de–dsb parallel data instead of zero-shot via Polish) — the path to a non-trivial dsb encoder.
+
+---
+
+## Training-length ablation — eval-loss elbow undertrains retrieval
+
+Supervisor question on seeing the loss curves: the MSE loss elbows ~1 epoch in, so does the long tail of training earn its keep, or could we stop at the elbow? Ran a dedicated 1-epoch distillation (`labse_distill_morfessor_1ep`, own LR schedule) and evaluated it on the same Polish test + dsb parallel/BUCC sets.
+
+**Result:** at the elbow the MSE is already at its floor (0.00078 vs 0.00054 full), but every retrieval metric is only 20–70% of the full-run value — Polish test pl→de 0.484 vs 0.941, dsb parallel 0.040 vs 0.136, dsb BUCC F1 0.000 vs 0.005. The distillation MSE and downstream retrieval are **decoupled**: MSE converges ~1 epoch in, retrieval keeps climbing across the whole schedule. So selecting/early-stopping on eval loss undertrains retrieval by 2–5×; select on retrieval P@1 and run the full schedule. Full table in [EVALUATIONS.md §10](EVALUATIONS.md).
+
+### `scripts/eval_forgetting.py` — intrinsic-capability (MLM) probe
+
+Added to check whether distillation damages the encoder's pretrained Sorbian competence. Loads the original MLM head onto a distilled body and measures held-out Sorbian perplexity. **Caveat learned (important):** this frozen-head test is *not* a valid forgetting measure — distillation fine-tunes the whole body, so its token representations rotate and the old head can no longer read them, blowing up perplexity (measured 10.1 → 4400) even when nothing is forgotten. The non-zero dsb retrieval numbers already prove the Sorbian signal survives. The correct standard test is a **probe**: freeze the body, train a *fresh* head, and compare distilled-body vs original-body — not yet implemented. Kept only as a secondary diagnostic; retrieval P@1 is the primary capability metric.

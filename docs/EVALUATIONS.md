@@ -427,6 +427,21 @@ Over the realistic 67k-sentence pool the signal mostly evaporates: only 2.1% of 
 
 Zero-shot-via-Polish gives dsb a weak but genuine alignment (chance → 13.6% on a 1.3k pool, 2.1% on a 67k pool), **far too weak for real bitext mining**. The numbers are consistent across pool sizes — the weak signal simply doesn't survive 50× more distractors. The clear next lever is **distilling on actual de–dsb parallel data** rather than zero-shot transfer.
 
+### Training length ablation — the eval-loss elbow undertrains retrieval
+
+The MSE loss curve elbows early (steep drop to ~1 epoch, then a long slow tail). Natural question: is the tail worth it, or could we stop at the elbow? Answer: **stop at the elbow and every retrieval metric collapses, even though the loss barely differs.** A dedicated 1-epoch run (`labse_distill_morfessor_1ep`, own LR warmup+decay) vs the full run:
+
+| metric | 1 epoch (elbow) | full run | elbow / full |
+|---|---|---|---|
+| eval MSE (Polish test) | 0.00078 | 0.00054 | ~same (near floor) |
+| Polish test pl→de | 0.484 | 0.941 | ≈ ½ |
+| Polish test mean | 0.675 | 0.960 | ≈ 0.7× |
+| dsb parallel mean (1.3k pool) | 0.040 | 0.136 | ≈ ⅓ |
+| dsb BUCC retrieval P@1 (67k pool) | 4/902 = 0.0044 | 19/902 = 0.021 | ≈ ⅕ |
+| dsb BUCC F1 | 0.000 (tp 0) | 0.005 (tp 6) | → 0 |
+
+At the elbow the MSE is already at its floor, but retrieval — Polish *and* dsb, at every pool size — is only 20–70% of the fully-trained value and keeps climbing for the rest of the schedule. **The distillation MSE and downstream retrieval are decoupled:** MSE convergence happens ~1 epoch in, retrieval convergence takes the full run. So early-stopping / checkpoint-selecting on eval loss undertrains retrieval by 2–5×. **Train the full schedule and select the checkpoint on retrieval P@1, not on eval loss.**
+
 ## 11. What's still missing
 
 - Run the same distillation + dsb eval across the other four tokenizers — same dsb test, only the tokenizer differs, so it answers "which tokenizer transfers best to dsb" (morfessor's bar: parallel mean 0.136). Whether the morfessor BPC advantage carries into the distilled space is the open question.
