@@ -442,8 +442,34 @@ The MSE loss curve elbows early (steep drop to ~1 epoch, then a long slow tail).
 
 At the elbow the MSE is already at its floor, but retrieval — Polish *and* dsb, at every pool size — is only 20–70% of the fully-trained value and keeps climbing for the rest of the schedule. **The distillation MSE and downstream retrieval are decoupled:** MSE convergence happens ~1 epoch in, retrieval convergence takes the full run. So early-stopping / checkpoint-selecting on eval loss undertrains retrieval by 2–5×. **Train the full schedule and select the checkpoint on retrieval P@1, not on eval loss.**
 
+### Distillation data source — WikiMatrix beats Europarl for dsb transfer
+
+Both sources are de–pl parallel text, but different domains: Europarl is parliamentary proceedings (narrow), WikiMatrix is Wikipedia-mined (broad, encyclopedic). Re-distilled morfessor on WikiMatrix (`labse_distill_morfessor_wiki`) under the **same training budget** — 37,235 steps, matching the Europarl run — so the only variable is the data (WikiMatrix is smaller, 232k vs 476k pairs, so 37,235 steps ≈ 10 epochs over it vs 5 over Europarl; matching steps, not epochs, keeps the gradient-update count equal).
+
+| | Polish test mean | dsb parallel mean (1.3k) | dsb BUCC P@1 (67k) | dsb BUCC F1 |
+|---|---|---|---|---|
+| Europarl | **0.960** | 0.136 | 19/902 = 0.021 | 0.005 (tp 6) |
+| WikiMatrix | 0.795 | **0.202** | **47/902 = 0.052** | **0.0093 (tp 12)** |
+
+**WikiMatrix wins every dsb metric** (parallel +49%, BUCC P@1 ~2.5×, F1 ~1.9×) — while scoring *lower* on in-domain Polish. That inversion is the point: Europarl's narrow domain lets the student overfit to parliamentary Polish (great Polish retrieval, weaker generalization), whereas WikiMatrix's broad text transfers to Sorbian better despite being a "worse" fit to the Polish training distribution. So WikiMatrix is the source to use for the remaining tokenizers. The absolute numbers stay low (BUCC F1 ~0.01 is still far from usable mining) — that's the ceiling of zero-shot-via-Polish; direct de–dsb distillation remains the real lever.
+
+### Tokenizer comparison on dsb transfer (all five, WikiMatrix)
+
+Distilled all five encoders on WikiMatrix de–pl under the identical 37,235-step budget (`labse_distill_<tokenizer>_v2`, morfessor = `labse_distill_morfessor_wiki`), so the only variable is the tokenizer. Evaluated on the de–dsb test sets with `scripts/mine_eval.py`:
+
+| tokenizer | parallel mean (1.3k) | BUCC P@1 (67k) | BUCC F1 (tp) |
+|---|---|---|---|
+| **spm_unigram** | 0.200 | **0.068 (61)** | **0.0142 (16)** |
+| **morfessor** | **0.202** | 0.052 (47) | 0.0093 (12) |
+| morph_bpe | 0.182 | 0.047 (42) | 0.0094 (12) |
+| spm_bpe | 0.177 | 0.049 (44) | 0.0093 (9) |
+| morfessor_semi | 0.170 | 0.043 (39) | 0.0091 (11) |
+
+**spm_unigram and morfessor are the top tier** — tied on the clean parallel set (0.200 vs 0.202), with unigram clearly ahead on the harder BUCC pool (F1 0.0142 vs 0.0093). morph_bpe and spm_bpe sit a tier below; morfessor_semi is last on every metric. The clean-vs-hard split matters: on the 67k BUCC pool everything except unigram clusters near the floor (P@1 0.043–0.052), so the 1.3k parallel set is the more discriminating metric among the rest.
+
+Note this ordering differs from the intrinsic MLM/BPC ranking (§10 MLM table): spm_unigram was mid-pack on BPC but tops dsb transfer, and morfessor_semi was strong on BPC but is last here. So a better intrinsic language model did not translate into better cross-lingual transfer — the tokenizer that wins the MLM stage is not the one that wins the distilled retrieval task.
+
 ## 11. What's still missing
 
-- Run the same distillation + dsb eval across the other four tokenizers — same dsb test, only the tokenizer differs, so it answers "which tokenizer transfers best to dsb" (morfessor's bar: parallel mean 0.136). Whether the morfessor BPC advantage carries into the distilled space is the open question.
 - **Distill on real de–dsb parallel data** (not zero-shot via Polish) — the path to a genuinely useful dsb encoder and a non-trivial BUCC F1.
 - The same MLM comparison on hsb v3 / hsb lww would establish whether the dsb tokenizer ordering is language-general.

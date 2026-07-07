@@ -548,3 +548,17 @@ Supervisor question on seeing the loss curves: the MSE loss elbows ~1 epoch in, 
 ### `scripts/eval_forgetting.py` — intrinsic-capability (MLM) probe
 
 Added to check whether distillation damages the encoder's pretrained Sorbian competence. Loads the original MLM head onto a distilled body and measures held-out Sorbian perplexity. **Caveat learned (important):** this frozen-head test is *not* a valid forgetting measure — distillation fine-tunes the whole body, so its token representations rotate and the old head can no longer read them, blowing up perplexity (measured 10.1 → 4400) even when nothing is forgotten. The non-zero dsb retrieval numbers already prove the Sorbian signal survives. The correct standard test is a **probe**: freeze the body, train a *fresh* head, and compare distilled-body vs original-body — not yet implemented. Kept only as a secondary diagnostic; retrieval P@1 is the primary capability metric.
+
+---
+
+## Distillation data source — WikiMatrix beats Europarl for dsb transfer
+
+Re-distilled morfessor on WikiMatrix de–pl (`labse_distill_morfessor_wiki`) instead of Europarl, same training budget (37,235 steps — matched on gradient updates, not epochs, since WikiMatrix is smaller at 232k vs 476k pairs). Only the data source differs.
+
+**Result:** WikiMatrix wins every dsb transfer metric — parallel mean 0.202 vs 0.136 (+49%), BUCC retrieval P@1 47/902 vs 19/902 (~2.5×), BUCC F1 0.0093 vs 0.005 — while scoring *lower* on in-domain Polish (test mean 0.795 vs 0.960). The inversion is the finding: Europarl's narrow parliamentary domain lets the student overfit its Polish distribution (high Polish retrieval, weaker generalization), while WikiMatrix's broad encyclopedic text transfers to Sorbian better. WikiMatrix is the source for the remaining tokenizers. Absolute numbers stay low (zero-shot-via-Polish ceiling); direct de–dsb distillation is still the real lever. Full table in [EVALUATIONS.md §10](EVALUATIONS.md).
+
+---
+
+## Tokenizer comparison on dsb transfer — all five distilled on WikiMatrix
+
+Distilled all five encoders on WikiMatrix de–pl under the identical 37,235-step budget (`labse_distill_<tokenizer>_v2`), evaluated on the de–dsb parallel + BUCC test sets. Ranking by dsb transfer: **spm_unigram ≈ morfessor** (top; tied on the parallel set at 0.200/0.202, unigram ahead on BUCC F1 0.0142 vs 0.0093) > morph_bpe > spm_bpe > morfessor_semi (last). This differs from the intrinsic MLM/BPC ranking — the tokenizer that wins the MLM stage isn't the one that wins the distilled retrieval task. Full table in [EVALUATIONS.md §10](EVALUATIONS.md).
