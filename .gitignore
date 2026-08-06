@@ -19,5 +19,8 @@ models/
 # Local tool config
 .claude/
 
+# Personal running report (not for the repo record)
+reports.md
+
 # macOS
 .DS_Store

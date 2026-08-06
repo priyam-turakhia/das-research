@@ -469,6 +469,34 @@ Distilled all five encoders on WikiMatrix de–pl under the identical 37,235-ste
 
 Note this ordering differs from the intrinsic MLM/BPC ranking (§10 MLM table): spm_unigram was mid-pack on BPC but tops dsb transfer, and morfessor_semi was strong on BPC but is last here. So a better intrinsic language model did not translate into better cross-lingual transfer — the tokenizer that wins the MLM stage is not the one that wins the distilled retrieval task.
 
+### Off-the-shelf ceilings — LaBSE and Glot500 on de–dsb
+
+To ask whether the low student numbers reflect an infeasible task or an undertrained student, run the *same* CSLS eval but embed **both** sides with one off-the-shelf model (student removed from the loop):
+
+| model (both sides) | parallel mean (1.3k) | BUCC P@1 (67k) | BUCC F1 |
+|---|---|---|---|
+| **LaBSE** (retrieval-trained sentence encoder; no official dsb) | **0.630** | **0.550** | **0.341** |
+| best distilled student (spm_unigram, zero-shot via pl) | 0.200 | 0.068 | 0.014 |
+| Glot500 (covers dsb; raw mean-pooled masked-LM) | 0.048 | 0.014 | 0.010 |
+
+LaBSE alone reaches 0.63 / 0.34 — ~35× the student's F1 — via Slavic cognate transfer, so **the task is feasible; the student is undertrained.** Glot500 *does* cover Lower Sorbian yet scores near the floor, because its raw masked-LM embeddings are not retrieval-aligned (precisely why distillation exists); a distilled Glot500 would score far higher, so its row is a floor for "raw MLM embeddings," not a verdict on its dsb knowledge. The determinant is cross-lingual **retrieval training**, not dsb coverage. LaBSE's 0.63 is a strong reference the student's distillation targets — direct de–dsb training (below) is the lever to approach it. Baselines embed both sides with the named model; CSLS/k/threshold identical to the student runs.
+
+### Direct de–dsb distillation (morfessor, spm_unigram)
+
+The prior runs distilled on de–pl (Polish proxy) and transferred to dsb zero-shot. Here the student trains directly on de–dsb parallel data (`data/processed/de-dsb`, 113,971 train pairs; `--tgt-lang dsb`), same 37,235-step budget. Two encoders: morfessor and spm_unigram (the zero-shot winner). Evaluated on the same PaSeMiLL parallel + BUCC sets:
+
+| model (on PaSeMiLL) | parallel mean (1.3k) | BUCC P@1 (67k) | BUCC F1 (tp) |
+|---|---|---|---|
+| spm_unigram — zero-shot (via pl) | 0.200 | 0.068 | 0.014 |
+| morfessor — zero-shot (via pl) | 0.202 | 0.052 | 0.009 |
+| morfessor — direct de–dsb | 0.589 | 0.399 | 0.187 (219) |
+| **spm_unigram — direct de–dsb** | **0.796** | **0.734** | **0.427 (517)** |
+| LaBSE reference (both sides) | 0.630 | 0.550 | 0.341 |
+
+Direct training is a large gain over zero-shot: spm_unigram parallel 0.200→0.796, BUCC F1 0.014→0.427 (~30×). spm_unigram exceeds the LaBSE reference on all three metrics (parallel 0.796 vs 0.630, BUCC P@1 0.734 vs 0.550, F1 0.427 vs 0.341); morfessor is below LaBSE but far above zero-shot. This is the expected direction — LaBSE was used zero-shot on dsb (no dsb in its training), while these students train on 113,971 de–dsb pairs, so a small language-specialised encoder overtaking a large general one *on its own language* is the anticipated outcome, not an upset. The tokenizer gap is now large (unigram F1 ≈ 2× morfessor's), and matches the zero-shot tokenizer ranking (unigram > morfessor), not the intrinsic-MLM ranking.
+
+These are the *out-of-domain* PaSeMiLL numbers. On the *in-domain* de–dsb test set (same corpus as training) the same morfessor model scores mean 0.961 (dsb→de 0.936) — the gap to 0.589 on PaSeMiLL is domain shift, not a defect. Leakage and pair-alignment of the de–dsb data were verified before these runs (0 train/eval overlap on scored pairs; LaBSE aligned-cos 0.59 vs shuffled 0.14).
+
 ## 11. What's still missing
 
 - **Distill on real de–dsb parallel data** (not zero-shot via Polish) — the path to a genuinely useful dsb encoder and a non-trivial BUCC F1.

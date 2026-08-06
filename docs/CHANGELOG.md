@@ -562,3 +562,15 @@ Re-distilled morfessor on WikiMatrix de–pl (`labse_distill_morfessor_wiki`) in
 ## Tokenizer comparison on dsb transfer — all five distilled on WikiMatrix
 
 Distilled all five encoders on WikiMatrix de–pl under the identical 37,235-step budget (`labse_distill_<tokenizer>_v2`), evaluated on the de–dsb parallel + BUCC test sets. Ranking by dsb transfer: **spm_unigram ≈ morfessor** (top; tied on the parallel set at 0.200/0.202, unigram ahead on BUCC F1 0.0142 vs 0.0093) > morph_bpe > spm_bpe > morfessor_semi (last). This differs from the intrinsic MLM/BPC ranking — the tokenizer that wins the MLM stage isn't the one that wins the distilled retrieval task. Full table in [EVALUATIONS.md §10](EVALUATIONS.md).
+
+---
+
+## Off-the-shelf ceilings — why the de–dsb scores are low
+
+Ran the same CSLS eval with both sides embedded by one off-the-shelf model, to separate "task is hard" from "student is weak." **LaBSE** (retrieval-trained; no official dsb) scores parallel 0.630 / BUCC F1 0.341 — ~35× the best student's F1 — so the task is feasible and the student is undertrained. **Glot500** (covers dsb, but a raw masked-LM) scores near the floor (parallel 0.048), because raw MLM embeddings aren't retrieval-aligned — the determinant is cross-lingual retrieval training, not dsb coverage. LaBSE's 0.63 is the reference the student's distillation targets; motivates direct de–dsb distillation. Scoring note: `mine_eval.py` uses CSLS (subtract, k=20) + dynamic threshold per **PaSeMiLL** (Okabe et al., ComputEL 2025); the broader BUCC/LaBSE standard is ratio-margin (divide, k=4) — a sibling, not plain cosine. Full table in [EVALUATIONS.md §10](EVALUATIONS.md).
+
+---
+
+## Direct de–dsb distillation — morfessor and spm_unigram
+
+Distilled directly on de–dsb parallel data (`data/processed/de-dsb`, 113,971 train pairs, `--tgt-lang dsb`) instead of the Polish proxy, same 37,235-step budget. On the PaSeMiLL parallel + BUCC sets: morfessor parallel 0.589 / BUCC F1 0.187; **spm_unigram parallel 0.796 / BUCC P@1 0.734 / BUCC F1 0.427**. Large gain over zero-shot (spm_unigram BUCC F1 0.014→0.427, ~30×). spm_unigram exceeds the LaBSE both-sides reference (0.630 / 0.550 / 0.341) on all three metrics — the expected direction, since LaBSE saw no dsb while the student trains on 113k de–dsb pairs (small language-specialised encoder > large general one on its own language). Tokenizer gap now large (unigram F1 ≈ 2× morfessor), matching the zero-shot tokenizer ranking, not the intrinsic-MLM ranking. In-domain de–dsb test is higher (morfessor mean 0.961); the PaSeMiLL numbers are lower by domain shift. Data verified leak-free and correctly aligned beforehand. Full table in [EVALUATIONS.md §10](EVALUATIONS.md).
