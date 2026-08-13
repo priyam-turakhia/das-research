@@ -13,6 +13,7 @@ from tokenization.base import BaseTokenizer
 from tokenization.evaluate import (
     EvaluationResult,
     evaluate_tokenizer,
+    jsd_overlap,
     print_comparison_table,
     side_by_side_segmentation,
 )
@@ -40,8 +41,15 @@ def main() -> None:
     parser.add_argument(
         "--corpus",
         type=str,
-        required=True,
         help="Path to held-out evaluation corpus. Prefer the *_dev.txt or *_test.txt split; e.g. data/processed/<lang>/<dataset>_dev.txt.",
+    )
+    parser.add_argument(
+        "--overlap",
+        type=str,
+        nargs=2,
+        metavar=("CORPUS_A", "CORPUS_B"),
+        help="Two monolingual corpora; report cross-language token-distribution overlap (JSD, "
+        "lower = more shared pieces) for each --model-path instead of the standard evaluation.",
     )
     parser.add_argument(
         "--type",
@@ -54,6 +62,28 @@ def main() -> None:
 
     if not args.model_paths:
         logger.error("At least one --model-path is required")
+        sys.exit(1)
+
+    # Overlap mode: JSD between two languages' token distributions, per tokenizer.
+    if args.overlap:
+        corpus_a, corpus_b = args.overlap
+        for c in (corpus_a, corpus_b):
+            if not Path(c).exists():
+                logger.error(f"Overlap corpus not found: {c}")
+                sys.exit(1)
+        print(f"\nToken-distribution overlap (JSD, lower = more shared) between:\n  A: {corpus_a}\n  B: {corpus_b}\n")
+        for model_path_str in args.model_paths:
+            model_path = Path(model_path_str)
+            if not model_path.exists():
+                logger.warning(f"Model path not found, skipping: {model_path}")
+                continue
+            tokenizer = load_tokenizer(model_path, args.type)
+            jsd = jsd_overlap(tokenizer, corpus_a, corpus_b)
+            print(f"  {model_path.name:<28} JSD = {jsd:.4f}")
+        return
+
+    if not args.corpus:
+        logger.error("--corpus is required (or use --overlap CORPUS_A CORPUS_B)")
         sys.exit(1)
 
     # Validate corpus

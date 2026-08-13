@@ -141,6 +141,20 @@ def make_compute_metrics(eval_char_count: int, mlm_probability: float):
     return compute_metrics
 
 
+class NoShuffleTrainer(Trainer):
+    """Trainer that reads the training data in file order (no reshuffle).
+
+    Used with an interleaved multilingual corpus so every batch alternates
+    languages instead of drawing a random mix. MLM masking stays random (it
+    lives in the collator, not the sampler).
+    """
+
+    def _get_train_sampler(self, *args, **kwargs):
+        from torch.utils.data import SequentialSampler
+
+        return SequentialSampler(self.train_dataset)
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     # Data
@@ -180,6 +194,9 @@ def main() -> None:
     p.add_argument("--report-to", default="none",
                    help="Comma-separated: tensorboard,wandb,none")
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--no-shuffle", action="store_true",
+                   help="Read the training data in file order (no reshuffle). Use with an "
+                        "interleaved multilingual corpus so every batch alternates languages.")
     args = p.parse_args()
 
     if args.smoke and args.max_steps == -1:
@@ -266,7 +283,8 @@ def main() -> None:
         dataloader_num_workers=0,
     )
 
-    trainer = Trainer(
+    trainer_cls = NoShuffleTrainer if args.no_shuffle else Trainer
+    trainer = trainer_cls(
         model=model,
         args=training_args,
         train_dataset=tokenized["train"],

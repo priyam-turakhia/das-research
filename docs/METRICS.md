@@ -196,6 +196,33 @@ This is the primary way to evaluate whether Morfessor is producing morphological
 
 ---
 
+## Vocabulary allocation & cross-language overlap (multilingual tokenizers)
+
+Three tokenizer-only measures from Limisiewicz et al. (2023), used to analyse the multilingual
+tokenizers before any pretraining. All are computed in `tokenization/evaluate.py`; the first two show
+in the standard comparison table, the third via `scripts/evaluate.py --overlap CORPUS_A CORPUS_B`.
+
+### Characters per token (CPT) — allocation
+Non-space source characters divided by tokens produced on a corpus. Higher = the language is split into
+longer, more meaningful pieces (more of the vocabulary devoted to it). Related to fertility but
+character-based, so it is not thrown off by cross-lingual differences in word length.
+
+### Average rank (AR) — allocation
+Tokens are ranked 1..N by descending corpus frequency; AR is the mean rank weighted by occurrence.
+Higher = the language's text draws on a larger slice of the vocabulary. Rises when the vocabulary is
+bigger (e.g. a 32k unified tokenizer vs a 16k monolingual one), so compare AR at matched vocab sizes, or
+read it alongside CPT as evidence a language kept its allocation.
+
+### JSD overlap — cross-language sharing
+Both languages' corpora are tokenized with the **same** tokenizer; JSD (Jensen-Shannon divergence, base
+2, range [0,1]) between the two token-frequency distributions. **Lower = more shared pieces** (0 =
+identical, 1 = disjoint). For same-script pairs this predicts cross-lingual sentence-retrieval quality
+(overlap helps; Limisiewicz et al. 2023). Hämmerl et al. (2025) show this literal-overlap measure is
+valid specifically for same-script pairs — which all of de/pl/dsb are (Latin) — so a heavier
+alignability metric is unnecessary here.
+
+---
+
 ## Reading the metrics together
 
 No single metric tells you which tokenizer is best. Each captures a different property:

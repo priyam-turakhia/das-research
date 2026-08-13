@@ -99,6 +99,38 @@ LANG_REGISTRY: dict[str, LangSpec] = {
         },
         default_sources=("witaj", "mt_train", "mt_dev"),
     ),
+    "de": LangSpec(
+        glotlid_label="__label__deu_Latn",
+        sources={
+            "news": SourceSpec(
+                filename="deu_news_2023_300K.tar.gz",
+                extractor="leipzig",
+                url="https://downloads.wortschatz-leipzig.de/corpora/deu_news_2023_300K.tar.gz",
+            ),
+            "wiki": SourceSpec(
+                filename="deu_wikipedia_2021_300K.tar.gz",
+                extractor="leipzig",
+                url="https://downloads.wortschatz-leipzig.de/corpora/deu_wikipedia_2021_300K.tar.gz",
+            ),
+        },
+        default_sources=("news",),
+    ),
+    "pl": LangSpec(
+        glotlid_label="__label__pol_Latn",
+        sources={
+            "news": SourceSpec(
+                filename="pol_news_2022_300K.tar.gz",
+                extractor="leipzig",
+                url="https://downloads.wortschatz-leipzig.de/corpora/pol_news_2022_300K.tar.gz",
+            ),
+            "wiki": SourceSpec(
+                filename="pol_wikipedia_2021_300K.tar.gz",
+                extractor="leipzig",
+                url="https://downloads.wortschatz-leipzig.de/corpora/pol_wikipedia_2021_300K.tar.gz",
+            ),
+        },
+        default_sources=("news",),
+    ),
 }
 
 ASCII_CONTROL_CHARS = "".join(chr(i) for i in range(32)) + chr(127)

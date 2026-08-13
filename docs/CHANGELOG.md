@@ -571,6 +571,28 @@ Ran the same CSLS eval with both sides embedded by one off-the-shelf model, to s
 
 ---
 
-## Direct de–dsb distillation — morfessor and spm_unigram
+## Direct de–dsb distillation — all four tokenizers
 
-Distilled directly on de–dsb parallel data (`data/processed/de-dsb`, 113,971 train pairs, `--tgt-lang dsb`) instead of the Polish proxy, same 37,235-step budget. On the PaSeMiLL parallel + BUCC sets: morfessor parallel 0.589 / BUCC F1 0.187; **spm_unigram parallel 0.796 / BUCC P@1 0.734 / BUCC F1 0.427**. Large gain over zero-shot (spm_unigram BUCC F1 0.014→0.427, ~30×). spm_unigram exceeds the LaBSE both-sides reference (0.630 / 0.550 / 0.341) on all three metrics — the expected direction, since LaBSE saw no dsb while the student trains on 113k de–dsb pairs (small language-specialised encoder > large general one on its own language). Tokenizer gap now large (unigram F1 ≈ 2× morfessor), matching the zero-shot tokenizer ranking, not the intrinsic-MLM ranking. In-domain de–dsb test is higher (morfessor mean 0.961); the PaSeMiLL numbers are lower by domain shift. Data verified leak-free and correctly aligned beforehand. Full table in [EVALUATIONS.md §10](EVALUATIONS.md).
+Distilled each encoder directly on de–dsb parallel data (`data/processed/de-dsb`, 113,971 train pairs, `--tgt-lang dsb`) instead of the Polish proxy, same 37,235-step budget. PaSeMiLL parallel mean / BUCC F1: **morph_bpe 0.809 / 0.441**, spm_unigram 0.796 / 0.427, spm_bpe 0.696 / 0.287, morfessor 0.589 / 0.187. Large gain over zero-shot (~30×); three of four beat the LaBSE both-sides reference (0.630 / 0.341) on parallel — expected, since LaBSE is zero-shot on dsb while the students train on 113k de–dsb pairs. **Key finding: the tokenizer ranking is regime-dependent — no tokenizer is robustly best.** morfessor wins intrinsic MLM and is ~top zero-shot but is *last* on direct; morph_bpe is mid-pack earlier but *1st* on direct; spm_unigram is the only consistently strong one. So the MLM-stage winner is not the downstream winner, and the two distilled regimes disagree. Caveat: single seed; morph_bpe vs unigram (0.809 vs 0.796) is within likely noise, but morfessor's drop to last is a clear inversion. In-domain de–dsb test higher (morfessor 0.961); PaSeMiLL lower by domain shift. Supervised pairs verified leak-free (unsupervised pretraining-text overlap ~70%, constant across encoders — see §12). Full table in [EVALUATIONS.md §10](EVALUATIONS.md).
+
+---
+
+## Multilingual pretraining — data, tokenizers, metrics (encoders pending)
+
+Set up the "does a related/paired language in pretraining help the dsb encoder" experiment. Added German
+and Polish Leipzig-news sources to `LANG_REGISTRY` (`scripts/download_data.py`); new
+`scripts/build_multilingual_corpus.py` builds **balanced** (each non-dsb language capped to dsb's
+whitespace-token count) and **interleaved** (alternating lines) mixes → `data/processed/{de-dsb,pl-dsb,
+de-pl-dsb}-mono/`. `scripts/pretrain.py` gained `--no-shuffle` (SequentialSampler) so the alternation is
+preserved (masking stays random). Trained 12 **unified** tokenizers (4 types × 3 mixes, vocab = 16k ×
+n-languages). Added three tokenizer metrics to `tokenization/evaluate.py` (chars-per-token, average-rank,
+and cross-language `jsd_overlap`, the last via `scripts/evaluate.py --overlap`).
+
+**Tokenizer-level findings (pre-training):** cross-language overlap JSD shows **Polish+dsb shares far
+more than German+dsb** on all four types (e.g. unigram 0.468 vs 0.662) — predicting pl+dsb should help
+dsb more; and Sorbian **kept its allocation** in the 32k/48k unified tokenizers vs the 16k monolingual
+(validating "16k per language"). Motivating papers: Limisiewicz et al. (2023) — overlap helps same-script
+sentence retrieval; Hämmerl et al. (2025) — literal overlap is valid for same-script (all our langs are
+Latin), so no alignability metric needed. Note: the dsb pretraining side (`dsb/v2`) overlaps ~70–75% of
+the PaSeMiLL Sorbian eval *sentences* (unsupervised only; supervised pairs clean; constant across
+encoders). Full tables in [EVALUATIONS.md §12](EVALUATIONS.md). Encoders + distillation next.

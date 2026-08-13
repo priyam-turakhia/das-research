@@ -481,23 +481,78 @@ To ask whether the low student numbers reflect an infeasible task or an undertra
 
 LaBSE alone reaches 0.63 / 0.34 — ~35× the student's F1 — via Slavic cognate transfer, so **the task is feasible; the student is undertrained.** Glot500 *does* cover Lower Sorbian yet scores near the floor, because its raw masked-LM embeddings are not retrieval-aligned (precisely why distillation exists); a distilled Glot500 would score far higher, so its row is a floor for "raw MLM embeddings," not a verdict on its dsb knowledge. The determinant is cross-lingual **retrieval training**, not dsb coverage. LaBSE's 0.63 is a strong reference the student's distillation targets — direct de–dsb training (below) is the lever to approach it. Baselines embed both sides with the named model; CSLS/k/threshold identical to the student runs.
 
-### Direct de–dsb distillation (morfessor, spm_unigram)
+### Direct de–dsb distillation (all four tokenizers)
 
-The prior runs distilled on de–pl (Polish proxy) and transferred to dsb zero-shot. Here the student trains directly on de–dsb parallel data (`data/processed/de-dsb`, 113,971 train pairs; `--tgt-lang dsb`), same 37,235-step budget. Two encoders: morfessor and spm_unigram (the zero-shot winner). Evaluated on the same PaSeMiLL parallel + BUCC sets:
+The prior runs distilled on de–pl (Polish proxy) and transferred to dsb zero-shot. Here each encoder trains directly on de–dsb parallel data (`data/processed/de-dsb`, 113,971 train pairs; `--tgt-lang dsb`), same 37,235-step budget. Evaluated on the same PaSeMiLL parallel + BUCC sets:
 
-| model (on PaSeMiLL) | parallel mean (1.3k) | BUCC P@1 (67k) | BUCC F1 (tp) |
+| tokenizer (direct de–dsb) | parallel mean (1.3k) | BUCC P@1 (67k) | BUCC F1 (tp) |
 |---|---|---|---|
-| spm_unigram — zero-shot (via pl) | 0.200 | 0.068 | 0.014 |
-| morfessor — zero-shot (via pl) | 0.202 | 0.052 | 0.009 |
-| morfessor — direct de–dsb | 0.589 | 0.399 | 0.187 (219) |
-| **spm_unigram — direct de–dsb** | **0.796** | **0.734** | **0.427 (517)** |
-| LaBSE reference (both sides) | 0.630 | 0.550 | 0.341 |
+| **morph_bpe** | **0.809** | **0.753** | **0.441 (537)** |
+| spm_unigram | 0.796 | 0.734 | 0.427 (517) |
+| spm_bpe | 0.696 | 0.564 | 0.287 (345) |
+| morfessor | 0.589 | 0.399 | 0.187 (219) |
+| *LaBSE reference (both sides)* | *0.630* | *0.550* | *0.341* |
+| *(best zero-shot via pl, for scale)* | *0.202* | *0.068* | *0.014* |
 
-Direct training is a large gain over zero-shot: spm_unigram parallel 0.200→0.796, BUCC F1 0.014→0.427 (~30×). spm_unigram exceeds the LaBSE reference on all three metrics (parallel 0.796 vs 0.630, BUCC P@1 0.734 vs 0.550, F1 0.427 vs 0.341); morfessor is below LaBSE but far above zero-shot. This is the expected direction — LaBSE was used zero-shot on dsb (no dsb in its training), while these students train on 113,971 de–dsb pairs, so a small language-specialised encoder overtaking a large general one *on its own language* is the anticipated outcome, not an upset. The tokenizer gap is now large (unigram F1 ≈ 2× morfessor's), and matches the zero-shot tokenizer ranking (unigram > morfessor), not the intrinsic-MLM ranking.
+Direct training is a large gain over zero-shot (spm_unigram parallel 0.200→0.796, BUCC F1 0.014→0.427, ~30×). Three of four tokenizers beat the LaBSE reference on parallel retrieval (morph_bpe, spm_unigram, spm_bpe), the expected direction — LaBSE is zero-shot on dsb while these students train on 113k de–dsb pairs (small language-specialised encoder > large general one on its own language).
 
-These are the *out-of-domain* PaSeMiLL numbers. On the *in-domain* de–dsb test set (same corpus as training) the same morfessor model scores mean 0.961 (dsb→de 0.936) — the gap to 0.589 on PaSeMiLL is domain shift, not a defect. Leakage and pair-alignment of the de–dsb data were verified before these runs (0 train/eval overlap on scored pairs; LaBSE aligned-cos 0.59 vs shuffled 0.14).
+**The tokenizer ranking is regime-dependent — no tokenizer is robustly best.** Across the three stages: morfessor wins intrinsic MLM (1st) and is ~top zero-shot but comes **last** on direct de–dsb; morph_bpe is mid-pack on MLM/zero-shot but **1st** on direct; spm_unigram is the only consistently strong one (top-2 in both distilled regimes). So the tokenizer that wins the language-modeling stage is not the one that wins the actual downstream task, and even the two distilled regimes disagree. Caveat: single seed; morph_bpe vs spm_unigram (0.809 vs 0.796) is within likely noise, but morfessor's drop to last on direct is a clear inversion of its MLM win.
+
+These are the *out-of-domain* PaSeMiLL numbers. On the *in-domain* de–dsb test set (same corpus as training) the morfessor model scores mean 0.961 (dsb→de 0.936) — the gap to 0.589 on PaSeMiLL is domain shift, not a defect. Leakage and pair-alignment of the de–dsb data were verified before these runs (0 train/eval overlap on scored *pairs*; note the ~70% unsupervised pretraining-text overlap discussed in §12, constant across encoders).
 
 ## 11. What's still missing
 
-- **Distill on real de–dsb parallel data** (not zero-shot via Polish) — the path to a genuinely useful dsb encoder and a non-trivial BUCC F1.
 - The same MLM comparison on hsb v3 / hsb lww would establish whether the dsb tokenizer ordering is language-general.
+
+## 12. Multilingual pretraining — tokenizer-level analysis
+
+Experiment: does giving the base encoder a related/paired language (German and/or Polish) improve the
+distilled dsb sentence encoder, and does it change the tokenizer ranking? Setup: MLM-pretrain on a
+**monolingual mix** of dsb with German/Polish, **balanced** (each non-dsb language subsampled to dsb's
+whitespace-token count) and **interleaved** (alternating lines; trained in order via `pretrain.py
+--no-shuffle`). German/Polish are Leipzig news 300K (`scripts/download_data.py`, `--lang de/pl`); mixes
+built by `scripts/build_multilingual_corpus.py` → `data/processed/{de-dsb,pl-dsb,de-pl-dsb}-mono/`, each
+balanced to within 1 token/language (~4.25M tokens/language in train). Tokenizers are **unified**
+(shared vocabulary), vocab = 16k × number-of-languages (32k / 32k / 48k), all four types
+(spm_bpe, spm_unigram, morph_bpe, morfessor). Encoders/distillation/eval pending; the tokenizer-level
+metrics below are computed before pretraining.
+
+### Cross-language overlap (JSD, lower = more shared pieces)
+
+Between each mix's languages on their dev splits:
+
+| tokenizer | German+dsb | Polish+dsb |
+|---|---|---|
+| spm_unigram | 0.662 | **0.468** |
+| morfessor | 0.690 | **0.487** |
+| morph_bpe | 0.700 | **0.496** |
+| spm_bpe | 0.747 | **0.568** |
+
+**Polish shares much more with Sorbian than German does**, across every tokenizer type (both West-Slavic
+vs German being Germanic). spm_unigram has the most sharing of any type (consistent with Limisiewicz et
+al. 2023, and with unigram being the retrieval winner). Since overlap predicts same-script retrieval,
+this forecasts — *before training* — that **pl+dsb pretraining should help dsb more than de+dsb**.
+
+### Allocation (Sorbian on dsb dev) — "16k per language" preserved it
+
+| type | dsb-only 16k | de-dsb 32k | pl-dsb 32k | de-pl-dsb 48k |
+|---|---|---|---|---|
+| spm_unigram (chars/tok) | 3.041 | 3.161 | 3.172 | 3.200 |
+| spm_unigram (avg-rank) | 1227 | 1476 | 1490 | 1593 |
+| morfessor (chars/tok) | 3.004 | 2.982 | 3.047 | 3.014 |
+| morph_bpe (chars/tok) | 3.112 | 3.139 | 3.185 | 3.159 |
+| spm_bpe (chars/tok) | 3.633 | 3.719 | 3.700 | 3.749 |
+
+Going from the 16k monolingual tokenizer to the 32k/48k unified ones, Sorbian's chars/token holds or
+rises slightly and avg-rank climbs (it draws on more of the larger vocabulary) — so **Sorbian kept (even
+slightly gained) its allocation** despite sharing the vocabulary. This validates the 16k-per-language
+choice: sharing with German/Polish did not starve Sorbian's tokenization.
+
+### Leakage note (pretraining vs eval)
+
+The dsb side of these mixes is `dsb/v2`, which shares ~70–75% of the PaSeMiLL Sorbian eval *sentences*
+(same text, differing only by Moses punctuation-spacing). This is unsupervised pretraining overlap only
+— the supervised de–dsb *pairs* used in distillation are clean (0 overlap), and it is constant across
+all encoders so it does not bias any comparison. Standard/accepted for a language this small; noted for
+transparency (see `reports.md`). Adding German/Polish introduces no new leak (different languages; the
+student never encodes them at eval).

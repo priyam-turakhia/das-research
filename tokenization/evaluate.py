@@ -6,7 +6,9 @@ best for actual NLP tasks.
 """
 
 import logging
+import math
 import random
+from collections import Counter
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
 
@@ -54,6 +56,11 @@ class EvaluationResult:
     hf_match: int
     hf_mismatch: int
     segmentations: Dict[str, List[str]]
+    # Vocabulary-allocation metrics (Limisiewicz et al. 2023): how much of the
+    # vocabulary this language actually uses, per token. Higher = more/longer
+    # pieces devoted to the language.
+    chars_per_token: float = 0.0  # non-space source chars per produced token (CPT)
+    avg_rank: float = 0.0  # occurrence-weighted mean frequency-rank of produced tokens
 
 
 def load_corpus(corpus_path: str) -> List[str]:
@@ -102,6 +109,75 @@ def compute_unique_tokens(tokenizer: BaseTokenizer, sentences: List[str]) -> int
         for token in tokenizer.tokenize(sentence):
             seen.add(token)
     return len(seen)
+
+
+def compute_token_frequencies(tokenizer: BaseTokenizer, sentences: List[str]) -> Counter:
+    """Count how often each token type is produced over a corpus.
+
+    The empirical token distribution that both average-rank (per language) and
+    JSD overlap (across two languages) are computed from.
+    """
+    counts: Counter = Counter()
+    for sentence in sentences:
+        counts.update(tokenizer.tokenize(sentence))
+    return counts
+
+
+def compute_chars_per_token(tokenizer: BaseTokenizer, sentences: List[str]) -> float:
+    """Characters-per-token (CPT): non-space source chars divided by tokens produced.
+
+    A vocabulary-allocation measure (Limisiewicz et al. 2023, eq. 5) — higher
+    means the language is split into longer, more meaningful pieces.
+    """
+    total_chars = 0
+    total_tokens = 0
+    for sentence in sentences:
+        total_chars += len(sentence.replace(" ", ""))
+        total_tokens += len(tokenizer.tokenize(sentence))
+    return total_chars / total_tokens if total_tokens > 0 else 0.0
+
+
+def compute_avg_rank(counts: Counter) -> float:
+    """Occurrence-weighted mean frequency-rank of produced tokens (average rank).
+
+    Tokens are ranked 1..N by descending corpus frequency; the score is the mean
+    rank weighted by occurrence (Limisiewicz et al. 2023, eq. 4). Higher = the
+    language's text draws on a larger slice of the vocabulary.
+    """
+    total = sum(counts.values())
+    if total == 0:
+        return 0.0
+    weighted = 0.0
+    for rank, (_, count) in enumerate(counts.most_common(), start=1):
+        weighted += rank * count
+    return weighted / total
+
+
+def jsd_overlap(tokenizer: BaseTokenizer, corpus_a: str, corpus_b: str) -> float:
+    """Jensen-Shannon divergence between two languages' token distributions.
+
+    Both corpora are tokenized with the SAME tokenizer; we compare the resulting
+    token-frequency distributions (Limisiewicz et al. 2023, eq. 6), log base 2, so
+    the value lies in [0, 1]. LOWER = more vocabulary overlap between the languages
+    (0 = identical distributions, 1 = disjoint). For same-script pairs this predicts
+    cross-lingual sentence-retrieval quality.
+    """
+    freq_a = compute_token_frequencies(tokenizer, load_corpus(corpus_a))
+    freq_b = compute_token_frequencies(tokenizer, load_corpus(corpus_b))
+    total_a = sum(freq_a.values())
+    total_b = sum(freq_b.values())
+    if total_a == 0 or total_b == 0:
+        return 1.0
+    jsd = 0.0
+    for token in set(freq_a) | set(freq_b):
+        p = freq_a.get(token, 0) / total_a
+        q = freq_b.get(token, 0) / total_b
+        m = 0.5 * (p + q)
+        if p > 0:
+            jsd += 0.5 * p * math.log2(p / m)
+        if q > 0:
+            jsd += 0.5 * q * math.log2(q / m)
+    return jsd
 
 
 def compute_oov_rate(
@@ -271,6 +347,11 @@ def evaluate_tokenizer(
     vocab_coverage = unique_tokens / total_vocab if total_vocab > 0 else 0.0
     logger.info(f"  Unique tokens used: {unique_tokens:,} ({vocab_coverage:.1%} of vocab)")
 
+    # Vocabulary-allocation metrics (Limisiewicz et al. 2023)
+    chars_per_token = compute_chars_per_token(tokenizer, evaluation_sentences)
+    avg_rank = compute_avg_rank(compute_token_frequencies(tokenizer, evaluation_sentences))
+    logger.info(f"  Chars/token: {chars_per_token:.3f}   Avg rank: {avg_rank:.1f}")
+
     # OOV rate
     oov_rate = compute_oov_rate(tokenizer, evaluation_sentences)
     logger.info(f"  OOV rate: {oov_rate:.2%}")
@@ -308,6 +389,8 @@ def evaluate_tokenizer(
         hf_match=hf_match,
         hf_mismatch=hf_mismatch,
         segmentations=segmentations,
+        chars_per_token=chars_per_token,
+        avg_rank=avg_rank,
     )
 
 
@@ -340,6 +423,14 @@ def print_comparison_table(results: Dict[str, EvaluationResult]) -> None:
     print(
         f"{'Fertility (std)':<25}"
         + "".join(f"{r.fertility_std:>{column_width}.3f}" for r in results.values())
+    )
+    print(
+        f"{'Chars/token (CPT)':<25}"
+        + "".join(f"{r.chars_per_token:>{column_width}.3f}" for r in results.values())
+    )
+    print(
+        f"{'Avg rank (AR)':<25}"
+        + "".join(f"{r.avg_rank:>{column_width},.0f}" for r in results.values())
     )
     print(
         f"{'Vocab size':<25}"
